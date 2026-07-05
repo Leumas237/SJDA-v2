@@ -53,6 +53,23 @@ def current_user_id(request: Request) -> int:
     return user_id
 
 
+def current_approved_id(request: Request) -> int:
+    """Utilisateur validé par un admin (et non banni) : requis pour
+    la découverte, les swipes et les matchs."""
+    user_id = current_user_id(request)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT approved, banned FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    if not row or row["banned"]:
+        raise HTTPException(status_code=403, detail="Ce compte a été suspendu")
+    if not row["approved"]:
+        raise HTTPException(
+            status_code=403, detail="Ton inscription attend encore la validation"
+        )
+    return user_id
+
+
 def current_admin_id(request: Request) -> int:
     user_id = current_user_id(request)
     with get_db() as db:
@@ -65,4 +82,5 @@ def current_admin_id(request: Request) -> int:
 
 
 CurrentUser = Depends(current_user_id)
+CurrentApproved = Depends(current_approved_id)
 CurrentAdmin = Depends(current_admin_id)

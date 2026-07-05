@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT NOT NULL,
     is_admin      INTEGER NOT NULL DEFAULT 0,
     banned        INTEGER NOT NULL DEFAULT 0,
+    approved      INTEGER NOT NULL DEFAULT 0,       -- validé par un admin
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -24,7 +25,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     intent    TEXT NOT NULL DEFAULT 'les_deux',    -- amis | couple | les_deux
     gender    TEXT NOT NULL DEFAULT '',            -- fille | garcon | autre | ''
     seeking   TEXT NOT NULL DEFAULT 'tous',        -- filles | garcons | tous
-    photo     TEXT NOT NULL DEFAULT ''             -- nom de fichier dans uploads/
+    photo     TEXT NOT NULL DEFAULT '',            -- nom de fichier dans uploads/
+    instagram TEXT NOT NULL DEFAULT '',            -- réseaux : visibles
+    snapchat  TEXT NOT NULL DEFAULT '',            -- uniquement après match
+    whatsapp  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -67,14 +71,6 @@ CREATE TABLE IF NOT EXISTS activity (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-    sender_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content    TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_messages_match ON messages(match_id, id);
 """
 
 
@@ -84,6 +80,11 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE matches ADD COLUMN closed INTEGER NOT NULL DEFAULT 0",
+    # DEFAULT 1 : les comptes créés avant la validation obligatoire restent actifs
+    "ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE profiles ADD COLUMN instagram TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE profiles ADD COLUMN snapchat TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE profiles ADD COLUMN whatsapp TEXT NOT NULL DEFAULT ''",
 ]
 
 

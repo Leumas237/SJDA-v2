@@ -51,15 +51,14 @@ class ProfileIn(BaseModel):
     intent: str = "les_deux"
     gender: str = ""
     seeking: str = "tous"
+    instagram: str = Field(default="", max_length=60)
+    snapchat: str = Field(default="", max_length=60)
+    whatsapp: str = Field(default="", max_length=25)
 
 
 class SwipeIn(BaseModel):
     target_id: int
     liked: bool
-
-
-class MessageIn(BaseModel):
-    content: str = Field(min_length=1, max_length=2000)
 
 
 class ReportIn(BaseModel):
@@ -71,14 +70,20 @@ class ReportActionIn(BaseModel):
     action: str  # ban | dismiss
 
 
+class ApproveIn(BaseModel):
+    approve: bool
+
+
 class BanIn(BaseModel):
     banned: bool
 
 
 # ---------------------------------------------------------------- helpers
 
-def profile_dict(row) -> dict:
-    return {
+def profile_dict(row, socials: bool = False) -> dict:
+    """Fiche profil. Les réseaux sociaux (`socials=True`) ne sont exposés
+    qu'au propriétaire du profil et aux personnes matchées avec lui."""
+    d = {
         "user_id": row["user_id"],
         "name": row["name"],
         "bio": row["bio"],
@@ -89,6 +94,11 @@ def profile_dict(row) -> dict:
         "seeking": row["seeking"],
         "photo": f"/uploads/{row['photo']}" if row["photo"] else "",
     }
+    if socials:
+        d["instagram"] = row["instagram"]
+        d["snapchat"] = row["snapchat"]
+        d["whatsapp"] = row["whatsapp"]
+    return d
 
 
 def school_check(email: str, invite_code: str) -> None:
@@ -141,18 +151,23 @@ def register(body: RegisterIn):
     salt = auth.new_salt()
     pw_hash = auth.hash_password(body.password, salt)
     is_admin = int(email in config.ADMIN_EMAILS)
+    name = body.name.strip()
     with get_db() as db:
         try:
             cur = db.execute(
-                "INSERT INTO users (email, password_hash, salt, name, is_admin) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (email, pw_hash, salt, body.name.strip(), is_admin),
+                "INSERT INTO users (email, password_hash, salt, name, is_admin, approved) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                # les admins sont validés d'office ; les élèves attendent
+                (email, pw_hash, salt, name, is_admin, is_admin),
             )
         except Exception:
             raise HTTPException(status_code=409, detail="Cet email est déjà inscrit")
         user_id = cur.lastrowid
         db.execute("INSERT INTO profiles (user_id) VALUES (?)", (user_id,))
-        log_activity(db, "signup", f"{body.name.strip()} s'est inscrit·e")
+        if is_admin:
+            log_activity(db, "signup", f"{name} s'est inscrit·e")
+        else:
+            log_activity(db, "signup_request", f"⏳ {name} demande à s'inscrire")
     return {"token": auth.create_session(user_id), "user_id": user_id}
 
 
@@ -193,11 +208,15 @@ def app_config():
 def me(user_id: int = auth.CurrentUser):
     with get_db() as db:
         row = db.execute(
-            "SELECT p.*, u.name, u.is_admin FROM profiles p "
+            "SELECT p.*, u.name, u.is_admin, u.approved FROM profiles p "
             "JOIN users u ON u.id = p.user_id WHERE p.user_id = ?",
             (user_id,),
         ).fetchone()
-    return {**profile_dict(row), "is_admin": bool(row["is_admin"])}
+    return {
+        **profile_dict(row, socials=True),
+        "is_admin": bool(row["is_admin"]),
+        "approved": bool(row["approved"]),
+    }
 
 
 @app.put("/api/profile")
@@ -209,10 +228,14 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
     if body.seeking not in VALID_SEEKING:
         raise HTTPException(status_code=422, detail="Préférence invalide")
     interests = [t.strip()[:30] for t in body.interests if t.strip()][:12]
+    instagram = body.instagram.strip().lstrip("@")
+    snapchat = body.snapchat.strip().lstrip("@")
+    whatsapp = "".join(c for c in body.whatsapp if c.isdigit() or c == "+")
     with get_db() as db:
         db.execute(
             "UPDATE profiles SET bio = ?, classe = ?, interests = ?, intent = ?, "
-            "gender = ?, seeking = ? WHERE user_id = ?",
+            "gender = ?, seeking = ?, instagram = ?, snapchat = ?, whatsapp = ? "
+            "WHERE user_id = ?",
             (
                 body.bio.strip(),
                 body.classe.strip(),
@@ -220,6 +243,9 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
                 body.intent,
                 body.gender,
                 body.seeking,
+                instagram,
+                snapchat,
+                whatsapp,
                 user_id,
             ),
         )
@@ -263,14 +289,14 @@ def seeking_ok(seeker_pref: str, target_gender: str) -> bool:
 
 
 @app.get("/api/discover")
-def discover(user_id: int = auth.CurrentUser):
+def discover(user_id: int = auth.CurrentApproved):
     with get_db() as db:
         my = db.execute(
             "SELECT * FROM profiles WHERE user_id = ?", (user_id,)
         ).fetchone()
         rows = db.execute(
             "SELECT p.*, u.name FROM profiles p JOIN users u ON u.id = p.user_id "
-            "WHERE p.user_id != ? AND u.banned = 0 "
+            "WHERE p.user_id != ? AND u.banned = 0 AND u.approved = 1 "
             "AND p.user_id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?) "
             "ORDER BY RANDOM() LIMIT 30",
             (user_id, user_id),
@@ -291,7 +317,7 @@ def discover(user_id: int = auth.CurrentUser):
 
 
 @app.post("/api/swipe")
-def swipe(body: SwipeIn, user_id: int = auth.CurrentUser):
+def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
     if body.target_id == user_id:
         raise HTTPException(status_code=422, detail="Impossible de se swiper soi-même")
     with get_db() as db:
@@ -333,17 +359,15 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentUser):
     return {"matched": matched, "match_id": match_id}
 
 
-# ---------------------------------------------------------------- matchs & chat
+# ---------------------------------------------------------------- matchs
 
 @app.get("/api/matches")
-def list_matches(user_id: int = auth.CurrentUser):
+def list_matches(user_id: int = auth.CurrentApproved):
+    """Un match débloque les réseaux sociaux de l'autre (Insta, Snap, WhatsApp)."""
     with get_db() as db:
         rows = db.execute(
             """
-            SELECT m.id AS match_id, m.created_at,
-                   p.*, u.name,
-                   (SELECT content FROM messages WHERE match_id = m.id
-                    ORDER BY id DESC LIMIT 1) AS last_message
+            SELECT m.id AS match_id, m.created_at, p.*, u.name
             FROM matches m
             JOIN profiles p ON p.user_id = CASE WHEN m.user_a = ? THEN m.user_b ELSE m.user_a END
             JOIN users u ON u.id = p.user_id
@@ -356,46 +380,16 @@ def list_matches(user_id: int = auth.CurrentUser):
         {
             "match_id": row["match_id"],
             "since": row["created_at"],
-            "last_message": row["last_message"],
-            "profile": profile_dict(row),
+            "profile": profile_dict(row, socials=True),
         }
         for row in rows
     ]
 
 
-@app.get("/api/matches/{match_id}/messages")
-def get_messages(match_id: int, after: int = 0, user_id: int = auth.CurrentUser):
-    with get_db() as db:
-        get_match_or_404(db, match_id, user_id)
-        rows = db.execute(
-            "SELECT id, sender_id, content, created_at FROM messages "
-            "WHERE match_id = ? AND id > ? ORDER BY id LIMIT 200",
-            (match_id, after),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-@app.post("/api/matches/{match_id}/messages")
-def send_message(match_id: int, body: MessageIn, user_id: int = auth.CurrentUser):
-    with get_db() as db:
-        match = get_match_or_404(db, match_id, user_id)
-        cur = db.execute(
-            "INSERT INTO messages (match_id, sender_id, content) VALUES (?, ?, ?)",
-            (match_id, user_id, body.content.strip()),
-        )
-        msg = db.execute(
-            "SELECT id, sender_id, content, created_at FROM messages WHERE id = ?",
-            (cur.lastrowid,),
-        ).fetchone()
-    other = match["user_b"] if match["user_a"] == user_id else match["user_a"]
-    notify_user(other, {"type": "message", "match_id": match_id, "message": dict(msg)})
-    return dict(msg)
-
-
 # ---------------------------------------------------------------- signalement
 
 @app.post("/api/report")
-def report(body: ReportIn, user_id: int = auth.CurrentUser):
+def report(body: ReportIn, user_id: int = auth.CurrentApproved):
     """Signale l'autre membre d'un match : ferme la conversation, empêche
     de se recroiser dans la découverte, et alerte les admins."""
     with get_db() as db:
@@ -431,14 +425,18 @@ def report(body: ReportIn, user_id: int = auth.CurrentUser):
 def admin_overview(admin_id: int = auth.CurrentAdmin):
     with get_db() as db:
         stats = {
-            "users": db.execute("SELECT COUNT(*) c FROM users").fetchone()["c"],
+            "users": db.execute(
+                "SELECT COUNT(*) c FROM users WHERE approved = 1"
+            ).fetchone()["c"],
+            "pending_signups": db.execute(
+                "SELECT COUNT(*) c FROM users WHERE approved = 0 AND banned = 0"
+            ).fetchone()["c"],
             "banned": db.execute(
                 "SELECT COUNT(*) c FROM users WHERE banned = 1"
             ).fetchone()["c"],
             "matches": db.execute(
                 "SELECT COUNT(*) c FROM matches WHERE closed = 0"
             ).fetchone()["c"],
-            "messages": db.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"],
             "pending_reports": db.execute(
                 "SELECT COUNT(*) c FROM reports WHERE status = 'pending'"
             ).fetchone()["c"],
@@ -466,22 +464,7 @@ def admin_reports(admin_id: int = auth.CurrentAdmin):
             ORDER BY (r.status = 'pending') DESC, r.id DESC LIMIT 100
             """
         ).fetchall()
-        result = []
-        for r in rows:
-            messages = []
-            if r["match_id"]:
-                # Extrait de la conversation signalée : visible par l'admin
-                # uniquement parce qu'un signalement existe.
-                messages = [
-                    dict(m)
-                    for m in db.execute(
-                        "SELECT sender_id, content, created_at FROM messages "
-                        "WHERE match_id = ? ORDER BY id DESC LIMIT 15",
-                        (r["match_id"],),
-                    ).fetchall()
-                ][::-1]
-            result.append({**dict(r), "messages": messages})
-    return result
+    return [dict(r) for r in rows]
 
 
 @app.post("/api/admin/reports/{report_id}")
@@ -505,13 +488,43 @@ def admin_handle_report(
     return {"ok": True}
 
 
+@app.get("/api/admin/pending")
+def admin_pending(admin_id: int = auth.CurrentAdmin):
+    """Demandes d'inscription en attente de validation."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT u.id, u.name, u.email, u.created_at, p.classe, p.bio "
+            "FROM users u JOIN profiles p ON p.user_id = u.id "
+            "WHERE u.approved = 0 AND u.banned = 0 ORDER BY u.id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/admin/users/{target_id}/approve")
+def admin_approve(target_id: int, body: ApproveIn, admin_id: int = auth.CurrentAdmin):
+    with get_db() as db:
+        user = db.execute(
+            "SELECT * FROM users WHERE id = ? AND approved = 0", (target_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Demande introuvable")
+        if body.approve:
+            db.execute("UPDATE users SET approved = 1 WHERE id = ?", (target_id,))
+            log_activity(db, "approve", f"✅ {user['name']} a été accepté·e")
+        else:
+            # refus : le compte et son profil sont supprimés
+            db.execute("DELETE FROM users WHERE id = ?", (target_id,))
+            log_activity(db, "approve", f"❌ La demande de {user['name']} a été refusée")
+    return {"ok": True}
+
+
 @app.get("/api/admin/users")
 def admin_users(admin_id: int = auth.CurrentAdmin):
     with get_db() as db:
         rows = db.execute(
             "SELECT u.id, u.name, u.email, u.is_admin, u.banned, u.created_at, "
             "p.classe FROM users u JOIN profiles p ON p.user_id = u.id "
-            "ORDER BY u.id DESC LIMIT 500"
+            "WHERE u.approved = 1 ORDER BY u.id DESC LIMIT 500"
         ).fetchall()
     return [dict(r) for r in rows]
 

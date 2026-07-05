@@ -65,19 +65,18 @@
       </div>
     </section>
 
-    <!-- ================= CHAT ================= -->
-    <section id="view-chat" class="view hidden">
-      <header class="topbar chat-topbar">
-        <button id="btn-chat-back" class="icon-btn">←</button>
-        <img id="chat-avatar" class="avatar-sm" alt="">
-        <h2 id="chat-name"></h2>
-        <button id="btn-report" class="icon-btn report-btn" title="Signaler et bloquer">⚠️</button>
-      </header>
-      <div id="chat-messages" class="chat-messages"></div>
-      <form id="form-chat" class="chat-input">
-        <input type="text" id="chat-text" placeholder="Écris un message…" autocomplete="off" maxlength="2000">
-        <button type="submit" class="btn-send">➤</button>
-      </form>
+    <!-- ================= ATTENTE DE VALIDATION ================= -->
+    <section id="view-waiting" class="view hidden">
+      <div class="waiting-card">
+        <div class="waiting-emoji">⏳</div>
+        <h2>Demande envoyée !</h2>
+        <p>Ton inscription doit être validée par l'équipe de l'école.<br>
+        Tu recevras l'accès dès qu'elle est acceptée — cette page se
+        mettra à jour toute seule.</p>
+        <p class="muted">En attendant, prépare ton profil pour être prêt·e à matcher 😉</p>
+        <button id="btn-waiting-profile" class="btn-primary">Compléter mon profil</button>
+        <button id="btn-waiting-logout" class="btn-ghost">Se déconnecter</button>
+      </div>
     </section>
 
     <!-- ================= PROFIL ================= -->
@@ -99,6 +98,19 @@
         <label>Centres d'intérêt <span class="muted">(séparés par des virgules)</span>
           <input type="text" id="p-interests" placeholder="foot, musique, dessin…">
         </label>
+
+        <fieldset class="socials-box">
+          <legend>Mes réseaux 🔒 <span class="muted">visibles uniquement par tes matchs</span></legend>
+          <label>Instagram
+            <input type="text" id="p-instagram" maxlength="60" placeholder="@tonpseudo">
+          </label>
+          <label>Snapchat
+            <input type="text" id="p-snapchat" maxlength="60" placeholder="@tonpseudo">
+          </label>
+          <label>WhatsApp
+            <input type="tel" id="p-whatsapp" maxlength="25" placeholder="+237 6XX XX XX XX">
+          </label>
+        </fieldset>
         <label>Je cherche
           <select id="p-intent">
             <option value="amis">Des amis 🤝</option>
@@ -133,6 +145,9 @@
       <div class="admin-body">
         <div id="admin-stats" class="stats-grid"></div>
 
+        <h3 class="admin-h3">Demandes d'inscription</h3>
+        <div id="admin-pending"></div>
+
         <h3 class="admin-h3">Signalements</h3>
         <div id="admin-reports"></div>
 
@@ -146,8 +161,9 @@
 
     <!-- ================= NAV ================= -->
     <nav id="navbar" class="navbar hidden">
-      <button data-view="discover" class="nav-btn active">🔥<span>Découvrir</span></button>
-      <button data-view="matches" class="nav-btn">💬<span>Matchs</span></button>
+      <button data-view="waiting" class="nav-btn hidden" id="nav-waiting">⏳<span>Attente</span></button>
+      <button data-view="discover" class="nav-btn active" id="nav-discover">🔥<span>Découvrir</span></button>
+      <button data-view="matches" class="nav-btn" id="nav-matches">💞<span>Matchs</span></button>
       <button data-view="profile" class="nav-btn">👤<span>Profil</span></button>
       <button data-view="admin" class="nav-btn hidden" id="nav-admin">🛡️<span>Modération</span></button>
     </nav>
@@ -157,8 +173,21 @@
       <div class="match-popup-inner">
         <h2>C'est un match ! 🎉</h2>
         <p id="match-popup-text"></p>
-        <button id="btn-match-chat" class="btn-primary">Envoyer un message</button>
+        <button id="btn-match-socials" class="btn-primary">Voir ses réseaux 🔓</button>
         <button id="btn-match-close" class="btn-ghost">Continuer à swiper</button>
+      </div>
+    </div>
+
+    <!-- ================= FICHE MATCH (réseaux débloqués) ================= -->
+    <div id="detail-popup" class="match-popup hidden">
+      <div class="match-popup-inner detail-inner">
+        <div id="detail-avatar-wrap"></div>
+        <h2 id="detail-name"></h2>
+        <p id="detail-sub" class="muted"></p>
+        <p id="detail-bio"></p>
+        <div id="detail-socials" class="socials-list"></div>
+        <button id="btn-detail-close" class="btn-ghost">Fermer</button>
+        <button id="btn-detail-report" class="btn-ghost danger-text">⚠️ Signaler et bloquer</button>
       </div>
     </div>
   </div>

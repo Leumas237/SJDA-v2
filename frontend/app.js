@@ -7,10 +7,10 @@ const state = {
   token: localStorage.getItem("sjda_token") || "",
   userId: Number(localStorage.getItem("sjda_user_id")) || null,
   me: null,
-  deck: [],            // profils à swiper
-  currentChat: null,   // { matchId, profile, lastMsgId }
+  deck: [],             // profils à swiper
+  currentDetail: null,  // { matchId, profile } fiche match ouverte
   ws: null,
-  pollTimer: null,
+  approvalTimer: null,  // polling du statut "en attente de validation"
 };
 
 /* ---------------- API ---------------- */
@@ -31,15 +31,14 @@ async function api(path, options = {}) {
 
 /* ---------------- navigation ---------------- */
 
-const VIEWS = ["auth", "discover", "matches", "chat", "profile", "admin"];
+const VIEWS = ["auth", "discover", "matches", "waiting", "profile", "admin"];
 
 function show(view) {
   VIEWS.forEach((v) => $("view-" + v).classList.toggle("hidden", v !== view));
-  $("navbar").classList.toggle("hidden", view === "auth" || view === "chat");
+  $("navbar").classList.toggle("hidden", view === "auth");
   document.querySelectorAll(".nav-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === view)
   );
-  if (view !== "chat") stopChatPolling();
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -104,8 +103,9 @@ async function onLoggedIn(data, isNew = false) {
   localStorage.setItem("sjda_token", data.token);
   localStorage.setItem("sjda_user_id", data.user_id);
   state.me = await api("/me");
-  applyAdminUi();
+  applyAccessUi();
   connectWs();
+  if (!state.me.approved) { show("waiting"); return; }
   if (isNew) { show("profile"); fillProfileForm(); }
   else { show("discover"); loadDeck(); }
 }
@@ -115,10 +115,44 @@ function logout() {
   localStorage.removeItem("sjda_user_id");
   state.token = ""; state.userId = null; state.me = null;
   if (state.ws) { state.ws.close(); state.ws = null; }
+  stopApprovalPolling();
   show("auth");
 }
 
 $("btn-logout").onclick = logout;
+$("btn-waiting-logout").onclick = logout;
+$("btn-waiting-profile").onclick = () => { show("profile"); fillProfileForm(); };
+
+/* ---------------- attente de validation ---------------- */
+
+function applyAccessUi() {
+  const me = state.me || {};
+  const pending = !me.approved;
+  $("nav-waiting").classList.toggle("hidden", !pending);
+  $("nav-discover").classList.toggle("hidden", pending);
+  $("nav-matches").classList.toggle("hidden", pending);
+  $("nav-admin").classList.toggle("hidden", !me.is_admin);
+  if (pending) startApprovalPolling();
+  else stopApprovalPolling();
+}
+
+function startApprovalPolling() {
+  stopApprovalPolling();
+  state.approvalTimer = setInterval(async () => {
+    try {
+      state.me = await api("/me");
+    } catch { return; } // compte refusé -> api() a déjà déconnecté
+    if (state.me.approved) {
+      applyAccessUi();
+      show("discover");
+      loadDeck();
+    }
+  }, 5000);
+}
+
+function stopApprovalPolling() {
+  if (state.approvalTimer) { clearInterval(state.approvalTimer); state.approvalTimer = null; }
+}
 
 /* ---------------- profil ---------------- */
 
@@ -130,6 +164,9 @@ function fillProfileForm() {
   $("p-intent").value = p.intent || "les_deux";
   $("p-gender").value = p.gender || "";
   $("p-seeking").value = p.seeking || "tous";
+  $("p-instagram").value = p.instagram || "";
+  $("p-snapchat").value = p.snapchat || "";
+  $("p-whatsapp").value = p.whatsapp || "";
   setProfilePhoto(p.photo);
 }
 
@@ -156,6 +193,9 @@ $("form-profile").addEventListener("submit", async (e) => {
       intent: $("p-intent").value,
       gender: $("p-gender").value,
       seeking: $("p-seeking").value,
+      instagram: $("p-instagram").value,
+      snapchat: $("p-snapchat").value,
+      whatsapp: $("p-whatsapp").value,
     },
   });
   state.me = await api("/me");
@@ -282,11 +322,15 @@ $("btn-like").onclick = () => swipeTop(true);
 $("btn-pass").onclick = () => swipeTop(false);
 
 function showMatchPopup(profile, matchId) {
-  $("match-popup-text").textContent = `${profile.name} et toi vous êtes likés mutuellement.`;
+  $("match-popup-text").textContent =
+    `${profile.name} et toi vous êtes likés mutuellement. Ses réseaux sont débloqués !`;
   $("match-popup").classList.remove("hidden");
-  $("btn-match-chat").onclick = () => {
+  $("btn-match-socials").onclick = async () => {
     $("match-popup").classList.add("hidden");
-    openChat({ match_id: matchId, profile });
+    // recharge le match : les réseaux ne sont exposés qu'après le match
+    const matches = await api("/matches");
+    const m = matches.find((x) => x.match_id === matchId);
+    if (m) openMatchDetail(m);
   };
   $("btn-match-close").onclick = () => $("match-popup").classList.add("hidden");
 }
@@ -301,15 +345,24 @@ async function loadMatches() {
   matches.forEach((m) => {
     const li = document.createElement("li");
     li.className = "match-item";
+    const socials = socialIcons(m.profile);
     li.innerHTML = `
       ${avatarHtml(m.profile, "avatar")}
       <div>
         <div class="m-name">${escapeHtml(m.profile.name)}</div>
-        <div class="m-last">${escapeHtml(m.last_message || "Dites-vous bonjour 👋")}</div>
+        <div class="m-last">${socials || "🙈 Pas encore de réseaux renseignés"}</div>
       </div>`;
-    li.onclick = () => openChat(m);
+    li.onclick = () => openMatchDetail(m);
     list.appendChild(li);
   });
+}
+
+function socialIcons(p) {
+  const parts = [];
+  if (p.instagram) parts.push("📸 Instagram");
+  if (p.snapchat) parts.push("👻 Snap");
+  if (p.whatsapp) parts.push("💬 WhatsApp");
+  return parts.join(" · ");
 }
 
 function avatarHtml(profile, cls) {
@@ -317,88 +370,75 @@ function avatarHtml(profile, cls) {
   return `<div class="${cls}">${escapeHtml((profile.name || "?")[0].toUpperCase())}</div>`;
 }
 
-/* ---------------- chat ---------------- */
+/* ---------------- fiche match : réseaux débloqués ---------------- */
 
-async function openChat(m) {
-  state.currentChat = { matchId: m.match_id, profile: m.profile, lastMsgId: 0 };
-  $("chat-name").textContent = m.profile.name;
-  const av = $("chat-avatar");
-  if (m.profile.photo) { av.src = m.profile.photo; av.classList.remove("hidden"); }
-  else av.classList.add("hidden");
-  $("chat-messages").innerHTML = "";
-  show("chat");
-  await fetchNewMessages();
-  startChatPolling();
+function socialLinks(p) {
+  const links = [];
+  if (p.instagram) links.push({
+    label: "📸 Instagram", handle: "@" + p.instagram,
+    url: "https://instagram.com/" + encodeURIComponent(p.instagram),
+  });
+  if (p.snapchat) links.push({
+    label: "👻 Snapchat", handle: "@" + p.snapchat,
+    url: "https://www.snapchat.com/add/" + encodeURIComponent(p.snapchat),
+  });
+  if (p.whatsapp) links.push({
+    label: "💬 WhatsApp", handle: p.whatsapp,
+    url: "https://wa.me/" + p.whatsapp.replace(/\D/g, ""),
+  });
+  return links;
 }
 
-$("btn-chat-back").onclick = () => { show("matches"); loadMatches(); };
+function openMatchDetail(m) {
+  state.currentDetail = { matchId: m.match_id, profile: m.profile };
+  const p = m.profile;
+  $("detail-avatar-wrap").innerHTML = avatarHtml(p, "avatar detail-avatar");
+  $("detail-name").textContent = p.name;
+  $("detail-sub").textContent = [p.classe, (p.interests || []).join(", ")]
+    .filter(Boolean).join(" · ");
+  $("detail-bio").textContent = p.bio || "";
+  const links = socialLinks(p);
+  $("detail-socials").innerHTML = links.length
+    ? links.map((l) =>
+        `<a class="social-link" href="${l.url}" target="_blank" rel="noopener">
+          <span>${l.label}</span><b>${escapeHtml(l.handle)}</b></a>`
+      ).join("")
+    : `<p class="muted">🙈 ${escapeHtml(p.name)} n'a pas encore ajouté ses réseaux.<br>
+       Repasse plus tard !</p>`;
+  $("detail-popup").classList.remove("hidden");
+}
 
-$("btn-report").onclick = async () => {
-  const c = state.currentChat;
+$("btn-detail-close").onclick = () => {
+  $("detail-popup").classList.add("hidden");
+  state.currentDetail = null;
+};
+
+$("btn-detail-report").onclick = async () => {
+  const c = state.currentDetail;
   if (!c) return;
   const reason = prompt(
     `Signaler ${c.profile.name} aux modérateurs ?\n` +
-    "La conversation sera fermée et vous ne vous verrez plus.\n\n" +
+    "Le match sera supprimé et vous ne vous recroiserez plus.\n\n" +
     "Explique brièvement le problème :"
   );
   if (reason === null) return;
   await api("/report", { method: "POST", json: { match_id: c.matchId, reason } });
   alert("Signalement envoyé. Merci de contribuer à la sécurité de tous 💛");
-  show("matches");
+  $("detail-popup").classList.add("hidden");
+  state.currentDetail = null;
   loadMatches();
 };
 
-async function fetchNewMessages() {
-  const c = state.currentChat;
-  if (!c) return;
-  const msgs = await api(`/matches/${c.matchId}/messages?after=${c.lastMsgId}`);
-  msgs.forEach(appendMessage);
-}
-
-function appendMessage(msg) {
-  const c = state.currentChat;
-  if (!c || msg.id <= c.lastMsgId) return;
-  c.lastMsgId = Math.max(c.lastMsgId, msg.id);
-  const div = document.createElement("div");
-  div.className = "msg " + (msg.sender_id === state.userId ? "mine" : "theirs");
-  div.textContent = msg.content;
-  $("chat-messages").appendChild(div);
-  $("chat-messages").scrollTop = $("chat-messages").scrollHeight;
-}
-
-$("form-chat").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const text = $("chat-text").value.trim();
-  if (!text || !state.currentChat) return;
-  $("chat-text").value = "";
-  const msg = await api(`/matches/${state.currentChat.matchId}/messages`, {
-    method: "POST", json: { content: text },
-  });
-  appendMessage(msg);
-});
-
-function startChatPolling() {
-  stopChatPolling();
-  // filet de sécurité si le WebSocket est indisponible
-  state.pollTimer = setInterval(fetchNewMessages, 4000);
-}
-function stopChatPolling() {
-  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
-}
-
 /* ---------------- admin ---------------- */
 
-function applyAdminUi() {
-  $("nav-admin").classList.toggle("hidden", !(state.me && state.me.is_admin));
-}
-
 async function loadAdmin() {
-  const [overview, reports, users] = await Promise.all([
-    api("/admin/overview"), api("/admin/reports"), api("/admin/users"),
+  const [overview, pending, reports, users] = await Promise.all([
+    api("/admin/overview"), api("/admin/pending"), api("/admin/reports"), api("/admin/users"),
   ]);
   renderAdminStats(overview.stats);
   $("admin-feed").innerHTML = "";
   overview.feed.forEach((ev) => appendFeedItem(ev, false));
+  renderAdminPending(pending);
   renderAdminReports(reports);
   renderAdminUsers(users);
 }
@@ -406,10 +446,36 @@ async function loadAdmin() {
 function renderAdminStats(s) {
   $("admin-stats").innerHTML = `
     <div class="stat"><b>${s.users}</b><span>élèves</span></div>
+    <div class="stat ${s.pending_signups ? "alert" : ""}"><b>${s.pending_signups}</b><span>demandes</span></div>
     <div class="stat"><b>${s.matches}</b><span>matchs</span></div>
-    <div class="stat"><b>${s.messages}</b><span>messages</span></div>
     <div class="stat ${s.pending_reports ? "alert" : ""}"><b>${s.pending_reports}</b><span>signalements</span></div>
     <div class="stat"><b>${s.banned}</b><span>bannis</span></div>`;
+}
+
+function renderAdminPending(pending) {
+  const box = $("admin-pending");
+  box.innerHTML = pending.length ? "" : '<p class="muted admin-pad">Aucune demande en attente ✔</p>';
+  pending.forEach((u) => {
+    const div = document.createElement("div");
+    div.className = "report-card pending";
+    div.innerHTML = `
+      <div class="r-head"><b>${escapeHtml(u.name)}</b>
+        <span class="muted">${escapeHtml(u.email)}${u.classe ? " · " + escapeHtml(u.classe) : ""}</span></div>
+      ${u.bio ? `<div class="r-reason">« ${escapeHtml(u.bio)} »</div>` : ""}
+      <div class="r-actions">
+        <button class="btn-mini ok" data-approve="1">✅ Accepter</button>
+        <button class="btn-mini danger" data-approve="0">❌ Refuser</button>
+      </div>`;
+    div.querySelectorAll("[data-approve]").forEach((btn) => {
+      btn.onclick = async () => {
+        const approve = btn.dataset.approve === "1";
+        if (!approve && !confirm(`Refuser la demande de ${u.name} ? Son compte sera supprimé.`)) return;
+        await api(`/admin/users/${u.id}/approve`, { method: "POST", json: { approve } });
+        loadAdmin();
+      };
+    });
+    box.appendChild(div);
+  });
 }
 
 function appendFeedItem(ev, prepend = true) {
@@ -481,9 +547,7 @@ function connectWs() {
   const ws = new WebSocket(`${proto}://${location.host}/ws?token=${state.token}`);
   ws.onmessage = (e) => {
     const data = JSON.parse(e.data);
-    if (data.type === "message" && state.currentChat && data.match_id === state.currentChat.matchId) {
-      appendMessage(data.message);
-    } else if (data.type === "match") {
+    if (data.type === "match") {
       // rafraîchit la liste si on est dessus
       if (!$("view-matches").classList.contains("hidden")) loadMatches();
     } else if (data.type === "activity") {
@@ -492,6 +556,10 @@ function connectWs() {
         appendFeedItem(data.event);
         api("/admin/overview").then((o) => renderAdminStats(o.stats)).catch(() => {});
         if (data.event.type === "report") api("/admin/reports").then(renderAdminReports).catch(() => {});
+        if (data.event.type === "signup_request" || data.event.type === "approve") {
+          api("/admin/pending").then(renderAdminPending).catch(() => {});
+          api("/admin/users").then(renderAdminUsers).catch(() => {});
+        }
       }
     }
   };
@@ -515,8 +583,9 @@ if ("serviceWorker" in navigator) {
   if (state.token) {
     try {
       state.me = await api("/me");
-      applyAdminUi();
+      applyAccessUi();
       connectWs();
+      if (!state.me.approved) { show("waiting"); return; }
       show("discover");
       loadDeck();
       return;

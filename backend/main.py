@@ -23,6 +23,8 @@ from .db import get_db, init_db
 app = FastAPI(title=config.APP_NAME)
 init_db()
 
+from . import push  # noqa: E402  (génère les clés VAPID, a besoin du dossier data)
+
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 VALID_INTENTS = {"amis", "couple", "les_deux"}
@@ -60,7 +62,6 @@ class ProfileIn(BaseModel):
 class SwipeIn(BaseModel):
     target_id: int
     liked: bool
-    super_like: bool = False
 
 
 class ReportIn(BaseModel):
@@ -82,9 +83,12 @@ class BanIn(BaseModel):
 
 # ---------------------------------------------------------------- helpers
 
-def profile_dict(row, socials: bool = False) -> dict:
+def profile_dict(row, socials: bool = False, photos: list[str] | None = None) -> dict:
     """Fiche profil. Les réseaux sociaux (`socials=True`) ne sont exposés
     qu'au propriétaire du profil et aux personnes matchées avec lui."""
+    photos = photos or []
+    if not photos and row["photo"]:  # compat anciens comptes à photo unique
+        photos = [f"/uploads/{row['photo']}"]
     d = {
         "user_id": row["user_id"],
         "name": row["name"],
@@ -94,7 +98,8 @@ def profile_dict(row, socials: bool = False) -> dict:
         "intent": row["intent"],
         "gender": row["gender"],
         "seeking": row["seeking"],
-        "photo": f"/uploads/{row['photo']}" if row["photo"] else "",
+        "photos": photos,
+        "photo": photos[0] if photos else "",
         "age": row["age"] or None,
     }
     if socials:
@@ -102,6 +107,22 @@ def profile_dict(row, socials: bool = False) -> dict:
         d["snapchat"] = row["snapchat"]
         d["whatsapp"] = row["whatsapp"]
     return d
+
+
+def photos_map(db, user_ids: list[int]) -> dict[int, list[str]]:
+    """URLs des photos de chaque utilisateur, dans l'ordre."""
+    if not user_ids:
+        return {}
+    marks = ",".join("?" * len(user_ids))
+    rows = db.execute(
+        f"SELECT user_id, filename FROM photos WHERE user_id IN ({marks}) "
+        "ORDER BY position, id",
+        user_ids,
+    ).fetchall()
+    result: dict[int, list[str]] = {}
+    for r in rows:
+        result.setdefault(r["user_id"], []).append(f"/uploads/{r['filename']}")
+    return result
 
 
 def school_check(email: str, invite_code: str) -> None:
@@ -171,7 +192,17 @@ def register(body: RegisterIn):
             log_activity(db, "signup", f"{name} s'est inscrit·e")
         else:
             log_activity(db, "signup_request", f"⏳ {name} demande à s'inscrire")
+            push.push_to_users(
+                admin_ids(db), "Nouvelle demande d'inscription",
+                f"{name} veut rejoindre {config.APP_NAME}",
+            )
     return {"token": auth.create_session(user_id), "user_id": user_id}
+
+
+def admin_ids(db) -> list[int]:
+    return [r["id"] for r in db.execute(
+        "SELECT id FROM users WHERE is_admin = 1"
+    ).fetchall()]
 
 
 @app.post("/api/login")
@@ -215,8 +246,17 @@ def me(user_id: int = auth.CurrentUser):
             "JOIN users u ON u.id = p.user_id WHERE p.user_id = ?",
             (user_id,),
         ).fetchone()
+        my_photos = [
+            {"id": r["id"], "url": f"/uploads/{r['filename']}"}
+            for r in db.execute(
+                "SELECT id, filename FROM photos WHERE user_id = ? "
+                "ORDER BY position, id",
+                (user_id,),
+            ).fetchall()
+        ]
     return {
-        **profile_dict(row, socials=True),
+        **profile_dict(row, socials=True, photos=[p["url"] for p in my_photos]),
+        "my_photos": my_photos,
         "is_admin": bool(row["is_admin"]),
         "approved": bool(row["approved"]),
     }
@@ -258,6 +298,9 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
     return {"ok": True}
 
 
+MAX_PHOTOS = 6
+
+
 @app.post("/api/profile/photo")
 async def upload_photo(photo: UploadFile, user_id: int = auth.CurrentUser):
     ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
@@ -269,17 +312,34 @@ async def upload_photo(photo: UploadFile, user_id: int = auth.CurrentUser):
     if len(data) > config.MAX_PHOTO_BYTES:
         raise HTTPException(status_code=413, detail="Photo trop lourde (max 5 Mo)")
     filename = f"u{user_id}_{secrets.token_hex(8)}{ext}"
-    (config.UPLOADS_DIR / filename).write_bytes(data)
     with get_db() as db:
-        old = db.execute(
-            "SELECT photo FROM profiles WHERE user_id = ?", (user_id,)
-        ).fetchone()
-        db.execute(
-            "UPDATE profiles SET photo = ? WHERE user_id = ?", (filename, user_id)
+        count = db.execute(
+            "SELECT COUNT(*) c FROM photos WHERE user_id = ?", (user_id,)
+        ).fetchone()["c"]
+        if count >= MAX_PHOTOS:
+            raise HTTPException(
+                status_code=409, detail=f"Maximum {MAX_PHOTOS} photos"
+            )
+        (config.UPLOADS_DIR / filename).write_bytes(data)
+        cur = db.execute(
+            "INSERT INTO photos (user_id, filename, position) VALUES (?, ?, ?)",
+            (user_id, filename, count),
         )
-    if old and old["photo"]:
-        (config.UPLOADS_DIR / old["photo"]).unlink(missing_ok=True)
-    return {"photo": f"/uploads/{filename}"}
+    return {"id": cur.lastrowid, "url": f"/uploads/{filename}"}
+
+
+@app.delete("/api/profile/photos/{photo_id}")
+def delete_photo(photo_id: int, user_id: int = auth.CurrentUser):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT filename FROM photos WHERE id = ? AND user_id = ?",
+            (photo_id, user_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Photo introuvable")
+        db.execute("DELETE FROM photos WHERE id = ?", (photo_id,))
+    (config.UPLOADS_DIR / row["filename"]).unlink(missing_ok=True)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- découverte
@@ -295,7 +355,15 @@ def seeking_ok(seeker_pref: str, target_gender: str) -> bool:
 
 
 @app.get("/api/discover")
-def discover(user_id: int = auth.CurrentApproved):
+def discover(
+    age_min: int = 0,
+    age_max: int = 0,
+    classe: str = "",
+    user_id: int = auth.CurrentApproved,
+):
+    """Candidats compatibles, filtrables par âge et classe.
+
+    Les filtres d'âge n'excluent pas les profils sans âge renseigné."""
     with get_db() as db:
         my = db.execute(
             "SELECT * FROM profiles WHERE user_id = ?", (user_id,)
@@ -304,33 +372,31 @@ def discover(user_id: int = auth.CurrentApproved):
             "SELECT p.*, u.name FROM profiles p JOIN users u ON u.id = p.user_id "
             "WHERE p.user_id != ? AND u.banned = 0 AND u.approved = 1 "
             "AND p.user_id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?) "
-            "ORDER BY RANDOM() LIMIT 30",
+            "ORDER BY RANDOM() LIMIT 60",
             (user_id, user_id),
         ).fetchall()
-        superlikers = {
-            r["swiper_id"]
-            for r in db.execute(
-                "SELECT swiper_id FROM swipes WHERE target_id = ? AND liked = 2",
-                (user_id,),
-            ).fetchall()
-        }
-    candidates = []
-    for row in rows:
-        if not intents_compatible(my["intent"], row["intent"]):
-            continue
-        # Les préférences de genre ne s'appliquent qu'en contexte "couple"
-        romantic = my["intent"] != "amis" and row["intent"] != "amis"
-        if romantic and not (
-            seeking_ok(my["seeking"], row["gender"])
-            and seeking_ok(row["seeking"], my["gender"])
-        ):
-            continue
-        candidates.append(
-            {**profile_dict(row), "superliked_you": row["user_id"] in superlikers}
-        )
-    # ceux qui t'ont super liké passent en tête de pile
-    candidates.sort(key=lambda c: not c["superliked_you"])
-    return candidates[:15]
+        candidates = []
+        for row in rows:
+            if not intents_compatible(my["intent"], row["intent"]):
+                continue
+            # Les préférences de genre ne s'appliquent qu'en contexte "couple"
+            romantic = my["intent"] != "amis" and row["intent"] != "amis"
+            if romantic and not (
+                seeking_ok(my["seeking"], row["gender"])
+                and seeking_ok(row["seeking"], my["gender"])
+            ):
+                continue
+            if row["age"]:
+                if age_min and row["age"] < age_min:
+                    continue
+                if age_max and row["age"] > age_max:
+                    continue
+            if classe.strip() and classe.strip().lower() not in row["classe"].lower():
+                continue
+            candidates.append(row)
+        candidates = candidates[:15]
+        pmap = photos_map(db, [r["user_id"] for r in candidates])
+    return [profile_dict(r, photos=pmap.get(r["user_id"], [])) for r in candidates]
 
 
 @app.post("/api/swipe")
@@ -343,16 +409,15 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Utilisateur introuvable")
-        liked_val = 2 if (body.liked and body.super_like) else int(body.liked)
         db.execute(
             "INSERT OR REPLACE INTO swipes (swiper_id, target_id, liked) VALUES (?, ?, ?)",
-            (user_id, body.target_id, liked_val),
+            (user_id, body.target_id, int(body.liked)),
         )
         matched = False
         match_id = None
         if body.liked:
             reciprocal = db.execute(
-                "SELECT 1 FROM swipes WHERE swiper_id = ? AND target_id = ? AND liked >= 1",
+                "SELECT 1 FROM swipes WHERE swiper_id = ? AND target_id = ? AND liked = 1",
                 (body.target_id, user_id),
             ).fetchone()
             if reciprocal:
@@ -374,6 +439,12 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
                 log_activity(db, "match", f"Match entre {names[a]} et {names[b]}")
     if matched:
         notify_user(body.target_id, {"type": "match", "match_id": match_id})
+        push.push_to_users(
+            [body.target_id],
+            "C'est un match ! 🎉",
+            f"{names[user_id]} et toi vous êtes likés mutuellement. "
+            "Ses réseaux sont débloqués !",
+        )
     return {"matched": matched, "match_id": match_id}
 
 
@@ -400,7 +471,8 @@ def rewind(user_id: int = auth.CurrentApproved):
             "WHERE p.user_id = ?",
             (last["target_id"],),
         ).fetchone()
-    return {"profile": profile_dict(row)}
+        pmap = photos_map(db, [last["target_id"]])
+    return {"profile": profile_dict(row, photos=pmap.get(last["target_id"], []))}
 
 
 # ---------------------------------------------------------------- matchs
@@ -420,14 +492,47 @@ def list_matches(user_id: int = auth.CurrentApproved):
             """,
             (user_id, user_id, user_id),
         ).fetchall()
+        pmap = photos_map(db, [r["user_id"] for r in rows])
     return [
         {
             "match_id": row["match_id"],
             "since": row["created_at"],
-            "profile": profile_dict(row, socials=True),
+            "profile": profile_dict(
+                row, socials=True, photos=pmap.get(row["user_id"], [])
+            ),
         }
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------- push
+
+@app.get("/api/push/key")
+def push_key():
+    return {"key": push.public_key_b64()}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(sub: dict, user_id: int = auth.CurrentUser):
+    endpoint = sub.get("endpoint", "")
+    if not endpoint or "keys" not in sub:
+        raise HTTPException(status_code=422, detail="Abonnement invalide")
+    with get_db() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO push_subs (endpoint, user_id, sub) VALUES (?, ?, ?)",
+            (endpoint, user_id, json.dumps(sub)),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(sub: dict, user_id: int = auth.CurrentUser):
+    with get_db() as db:
+        db.execute(
+            "DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?",
+            (sub.get("endpoint", ""), user_id),
+        )
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- signalement
@@ -459,6 +564,10 @@ def report(body: ReportIn, user_id: int = auth.CurrentApproved):
         }
         log_activity(
             db, "report", f"⚠️ {names[user_id]} a signalé {names[reported]}"
+        )
+        push.push_to_users(
+            admin_ids(db), "⚠️ Nouveau signalement",
+            f"{names[user_id]} a signalé {names[reported]}",
         )
     return {"ok": True}
 
@@ -555,6 +664,10 @@ def admin_approve(target_id: int, body: ApproveIn, admin_id: int = auth.CurrentA
         if body.approve:
             db.execute("UPDATE users SET approved = 1 WHERE id = ?", (target_id,))
             log_activity(db, "approve", f"✅ {user['name']} a été accepté·e")
+            push.push_to_users(
+                [target_id], "Inscription acceptée ✅",
+                f"Bienvenue sur {config.APP_NAME} ! Tu peux commencer à swiper.",
+            )
         else:
             # refus : le compte et son profil sont supprimés
             db.execute("DELETE FROM users WHERE id = ?", (target_id,))

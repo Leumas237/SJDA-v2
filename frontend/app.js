@@ -105,6 +105,7 @@ async function onLoggedIn(data, isNew = false) {
   state.me = await api("/me");
   applyAccessUi();
   connectWs();
+  setupPush();
   if (!state.me.approved) { show("waiting"); return; }
   if (isNew) { show("profile"); fillProfileForm(); }
   else { show("discover"); loadDeck(); }
@@ -168,18 +169,32 @@ function fillProfileForm() {
   $("p-instagram").value = p.instagram || "";
   $("p-snapchat").value = p.snapchat || "";
   $("p-whatsapp").value = p.whatsapp || "";
-  setProfilePhoto(p.photo);
+  renderPhotosGrid();
 }
 
-function setProfilePhoto(url) {
-  const img = $("profile-photo");
-  if (url) {
-    img.src = url;
-    img.classList.remove("hidden");
-    $("photo-placeholder").classList.add("hidden");
-  } else {
-    img.classList.add("hidden");
-    $("photo-placeholder").classList.remove("hidden");
+function renderPhotosGrid() {
+  const grid = $("photos-grid");
+  grid.innerHTML = "";
+  const photos = (state.me && state.me.my_photos) || [];
+  photos.forEach((ph) => {
+    const slot = document.createElement("div");
+    slot.className = "photo-slot";
+    slot.innerHTML = `<img src="${ph.url}" alt="">
+      <button type="button" class="photo-del" title="Supprimer">✕</button>`;
+    slot.querySelector(".photo-del").onclick = async () => {
+      await api(`/profile/photos/${ph.id}`, { method: "DELETE" });
+      state.me = await api("/me");
+      renderPhotosGrid();
+    };
+    grid.appendChild(slot);
+  });
+  if (photos.length < 6) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "photo-slot photo-add";
+    add.textContent = "+";
+    add.onclick = () => $("photo-input").click();
+    grid.appendChild(add);
   }
 }
 
@@ -208,19 +223,63 @@ $("form-profile").addEventListener("submit", async (e) => {
 $("photo-input").addEventListener("change", async () => {
   const file = $("photo-input").files[0];
   if (!file) return;
+  $("photo-input").value = "";
   const form = new FormData();
   form.append("photo", file);
-  const data = await api("/profile/photo", { method: "POST", body: form });
-  setProfilePhoto(data.photo);
-  if (state.me) state.me.photo = data.photo;
+  try {
+    await api("/profile/photo", { method: "POST", body: form });
+    state.me = await api("/me");
+    renderPhotosGrid();
+  } catch (err) { alert(err.message); }
 });
 
 /* ---------------- swipe ---------------- */
 
 const INTENT_LABEL = { amis: "🤝 Cherche des amis", couple: "💘 Cherche l'amour", les_deux: "😄 Ouvert·e à tout" };
 
+/* ---------------- filtres de découverte ---------------- */
+
+function getFilters() {
+  try { return JSON.parse(localStorage.getItem("sjda_filters")) || {}; }
+  catch { return {}; }
+}
+
+function filterQuery() {
+  const f = getFilters();
+  const params = new URLSearchParams();
+  if (f.age_min) params.set("age_min", f.age_min);
+  if (f.age_max) params.set("age_max", f.age_max);
+  if (f.classe) params.set("classe", f.classe);
+  const qs = params.toString();
+  return qs ? "?" + qs : "";
+}
+
+$("btn-filters").onclick = () => {
+  const f = getFilters();
+  $("f-age-min").value = f.age_min || "";
+  $("f-age-max").value = f.age_max || "";
+  $("f-classe").value = f.classe || "";
+  $("filter-popup").classList.remove("hidden");
+};
+
+$("btn-filters-apply").onclick = () => {
+  localStorage.setItem("sjda_filters", JSON.stringify({
+    age_min: Number($("f-age-min").value) || 0,
+    age_max: Number($("f-age-max").value) || 0,
+    classe: $("f-classe").value.trim(),
+  }));
+  $("filter-popup").classList.add("hidden");
+  loadDeck();
+};
+
+$("btn-filters-reset").onclick = () => {
+  localStorage.removeItem("sjda_filters");
+  $("filter-popup").classList.add("hidden");
+  loadDeck();
+};
+
 async function loadDeck() {
-  state.deck = await api("/discover");
+  state.deck = await api("/discover" + filterQuery());
   renderDeck();
 }
 
@@ -235,26 +294,47 @@ function renderDeck() {
 
 function makeCard(p) {
   const card = document.createElement("div");
-  card.className = "card" + (p.photo ? "" : " no-photo");
-  if (p.photo) card.style.backgroundImage = `url(${p.photo})`;
-  else card.dataset.initial = (p.name || "?")[0].toUpperCase();
+  const photos = p.photos || [];
+  card.className = "card" + (photos.length ? "" : " no-photo");
+  if (!photos.length) card.dataset.initial = (p.name || "?")[0].toUpperCase();
   card.dataset.userId = p.user_id;
+  card.dataset.photoIndex = "0";
   const interests = (p.interests || [])
     .map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join("");
-  const superBadge = p.superliked_you
-    ? '<span class="badge superliked">★ T\'a super liké</span>' : "";
   const age = p.age ? `<span class="age">, ${p.age}</span>` : "";
+  const dots = photos.length > 1
+    ? `<div class="photo-dots">${photos.map((_, i) =>
+        `<span class="${i === 0 ? "on" : ""}"></span>`).join("")}</div>`
+    : "";
   card.innerHTML = `
+    ${dots}
     <div class="stamp like">LIKE</div>
     <div class="stamp pass">NOPE</div>
-    <div class="stamp superstamp">SUPER LIKE</div>
     <div class="card-info">
       <h3>${escapeHtml(p.name)}${age}</h3>
       <div class="card-sub">${escapeHtml(p.classe || "")}</div>
       <div>${escapeHtml(p.bio || "")}</div>
-      <div class="badges">${superBadge}<span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
+      <div class="badges"><span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
     </div>`;
+  setCardPhoto(card, photos, 0);
   return card;
+}
+
+function setCardPhoto(card, photos, index) {
+  if (!photos.length) return;
+  card.dataset.photoIndex = String(index);
+  card.style.backgroundImage = `url(${photos[index]})`;
+  card.querySelectorAll(".photo-dots span").forEach((dot, i) =>
+    dot.classList.toggle("on", i === index)
+  );
+}
+
+function cycleCardPhoto(card, forward) {
+  const p = state.deck[0];
+  if (!p || !p.photos || p.photos.length < 2) return;
+  const n = p.photos.length;
+  const i = (Number(card.dataset.photoIndex) + (forward ? 1 : -1) + n) % n;
+  setCardPhoto(card, p.photos, i);
 }
 
 function topCard() { return $("deck").lastElementChild; }
@@ -278,18 +358,21 @@ function attachDrag() {
     dx = x - startX;
     dy = y - startY;
     card.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 18}deg)`;
-    const superIntent = dy < -60 && Math.abs(dx) < 80;
-    card.querySelector(".stamp.like").style.opacity = superIntent ? 0 : Math.max(0, dx / 90);
-    card.querySelector(".stamp.pass").style.opacity = superIntent ? 0 : Math.max(0, -dx / 90);
-    card.querySelector(".stamp.superstamp").style.opacity = superIntent ? Math.min(1, -dy / 140) : 0;
+    card.querySelector(".stamp.like").style.opacity = Math.max(0, dx / 90);
+    card.querySelector(".stamp.pass").style.opacity = Math.max(0, -dx / 90);
   };
-  const onUp = () => {
+  const onUp = (e) => {
     if (!dragging) return;
     dragging = false;
-    if (dy < -120 && Math.abs(dx) < 80) swipeTop(true, true); // swipe haut = Super Like
-    else if (dx > 100) swipeTop(true);
+    if (dx > 100) swipeTop(true);
     else if (dx < -100) swipeTop(false);
     else {
+      // tap (presque pas de mouvement) : change de photo façon Tinder
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && e) {
+        const rect = card.getBoundingClientRect();
+        const x = (e.changedTouches ? e.changedTouches[0] : e).clientX;
+        cycleCardPhoto(card, x - rect.left > rect.width / 2);
+      }
       card.style.transition = "transform 0.25s";
       card.style.transform = "";
       card.querySelectorAll(".stamp").forEach((s) => (s.style.opacity = 0));
@@ -302,22 +385,18 @@ function attachDrag() {
   window.addEventListener("pointerup", onUp);
 }
 
-async function swipeTop(liked, superLike = false) {
+async function swipeTop(liked) {
   const card = topCard();
   if (!card) return;
   const targetId = Number(card.dataset.userId);
   card.style.transition = "transform 0.35s ease-in";
-  if (superLike) {
-    card.style.transform = "translate(0, -130vh) rotate(0deg)";
-  } else {
-    card.style.transform = `translate(${liked ? "120vw" : "-120vw"}, -30px) rotate(${liked ? 20 : -20}deg)`;
-  }
+  card.style.transform = `translate(${liked ? "120vw" : "-120vw"}, -30px) rotate(${liked ? 20 : -20}deg)`;
   setTimeout(() => card.remove(), 300);
 
   const swiped = state.deck.shift();
   if (state.deck.length <= 2) {
     // recharge en arrière-plan quand la pile baisse
-    api("/discover").then((more) => {
+    api("/discover" + filterQuery()).then((more) => {
       const known = new Set(state.deck.map((p) => p.user_id));
       more.forEach((p) => { if (!known.has(p.user_id) && p.user_id !== swiped.user_id) state.deck.push(p); });
       renderDeck();
@@ -329,7 +408,7 @@ async function swipeTop(liked, superLike = false) {
   try {
     const res = await api("/swipe", {
       method: "POST",
-      json: { target_id: targetId, liked, super_like: superLike },
+      json: { target_id: targetId, liked },
     });
     if (res.matched) showMatchPopup(swiped, res.match_id);
   } catch (err) { console.error(err); }
@@ -337,7 +416,6 @@ async function swipeTop(liked, superLike = false) {
 
 $("btn-like").onclick = () => swipeTop(true);
 $("btn-pass").onclick = () => swipeTop(false);
-$("btn-super").onclick = () => swipeTop(true, true);
 
 $("btn-rewind").onclick = async () => {
   try {
@@ -580,6 +658,54 @@ function renderAdminUsers(users) {
   });
 }
 
+/* ---------------- notifications push ---------------- */
+
+function urlB64ToUint8(base64) {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob((base64 + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function setupPush() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      // ré-enregistre côté serveur (le compte a pu changer d'appareil)
+      await api("/push/subscribe", { method: "POST", json: sub.toJSON() });
+      return;
+    }
+    if (Notification.permission === "granted") {
+      await subscribePush();
+      return;
+    }
+    if (Notification.permission !== "denied") {
+      $("btn-push").classList.remove("hidden");
+    }
+  } catch { /* le push est du confort, jamais bloquant */ }
+}
+
+async function subscribePush() {
+  const { key } = await api("/push/key");
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlB64ToUint8(key),
+  });
+  await api("/push/subscribe", { method: "POST", json: sub.toJSON() });
+  $("btn-push").classList.add("hidden");
+}
+
+$("btn-push").onclick = async () => {
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    try { await subscribePush(); } catch { /* réessaiera au prochain lancement */ }
+  } else {
+    $("btn-push").classList.add("hidden");
+  }
+};
+
 /* ---------------- websocket ---------------- */
 
 function connectWs() {
@@ -626,6 +752,7 @@ if ("serviceWorker" in navigator) {
       state.me = await api("/me");
       applyAccessUi();
       connectWs();
+      setupPush();
       if (!state.me.approved) { show("waiting"); return; }
       show("discover");
       loadDeck();

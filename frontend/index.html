@@ -43,16 +43,21 @@
 
     <!-- ================= SWIPE ================= -->
     <section id="view-discover" class="view hidden">
-      <header class="topbar brand-bar"><h1 class="brand">🔥 SJDA</h1></header>
+      <header class="topbar brand-bar">
+        <h1 class="brand">🔥 SJDA</h1>
+        <div class="topbar-actions">
+          <button id="btn-push" class="icon-btn hidden" title="Activer les notifications">🔔</button>
+          <button id="btn-filters" class="icon-btn" title="Filtres">⚙️</button>
+        </div>
+      </header>
       <div id="deck" class="deck"></div>
       <div id="deck-empty" class="empty hidden">
         <p>😌 Plus personne à découvrir pour l'instant.</p>
-        <p class="muted">Reviens plus tard, ou invite tes camarades&nbsp;!</p>
+        <p class="muted">Reviens plus tard, élargis tes filtres, ou invite tes camarades&nbsp;!</p>
       </div>
       <div class="swipe-actions">
         <button id="btn-rewind" class="round-btn sm rewind" title="Annuler le dernier swipe">↺</button>
         <button id="btn-pass" class="round-btn pass" title="Passer">✕</button>
-        <button id="btn-super" class="round-btn sm super" title="Super Like">★</button>
         <button id="btn-like" class="round-btn like" title="J'aime">❤</button>
       </div>
     </section>
@@ -90,11 +95,11 @@
     <section id="view-profile" class="view hidden">
       <header class="topbar"><h2>Mon profil</h2></header>
       <form id="form-profile" class="profile-form">
-        <label class="photo-picker">
-          <img id="profile-photo" src="" alt="" class="hidden">
-          <span id="photo-placeholder">📷<br>Ajouter une photo</span>
+        <div>
+          <div class="label-line">Mes photos <span class="muted">(jusqu'à 6, la 1ère est la principale)</span></div>
+          <div id="photos-grid" class="photos-grid"></div>
           <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" hidden>
-        </label>
+        </div>
 
         <label>Bio
           <textarea id="p-bio" maxlength="500" rows="3" placeholder="Parle un peu de toi…"></textarea>
@@ -186,6 +191,24 @@
         <p id="match-popup-text"></p>
         <button id="btn-match-socials" class="btn-light">Voir ses réseaux 🔓</button>
         <button id="btn-match-close" class="btn-ghost-light">Continuer à swiper</button>
+      </div>
+    </div>
+
+    <!-- ================= FILTRES DE DÉCOUVERTE ================= -->
+    <div id="filter-popup" class="match-popup hidden">
+      <div class="match-popup-inner">
+        <h2>Filtres ⚙️</h2>
+        <label class="filter-label">Âge minimum
+          <input type="number" id="f-age-min" min="15" max="30" placeholder="—">
+        </label>
+        <label class="filter-label">Âge maximum
+          <input type="number" id="f-age-max" min="15" max="30" placeholder="—">
+        </label>
+        <label class="filter-label">Classe contient
+          <input type="text" id="f-classe" maxlength="40" placeholder="ex. MPSI">
+        </label>
+        <button id="btn-filters-apply" class="btn-primary">Appliquer</button>
+        <button id="btn-filters-reset" class="btn-ghost">Tout réinitialiser</button>
       </div>
     </div>
 

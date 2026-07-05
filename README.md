@@ -5,8 +5,14 @@ sortir de leur bulle : se faire des amis, ou peut-être plus, si affinités !
 
 ## Fonctionnalités
 
-- 🔥 **Découverte façon swipe** : glisse à droite pour liker, à gauche pour passer
+- 🔥 **Découverte façon swipe** : glisse à droite pour liker, à gauche pour passer,
+  ↺ pour annuler ton dernier swipe. Jusqu'à **6 photos par profil**, avec
+  carrousel sur la carte (tap gauche/droite pour changer de photo)
+- ⚙️ **Filtres de découverte** : par âge (min/max) et par classe
 - 🎉 **Match** quand deux personnes se likent mutuellement
+- 🔔 **Notifications push** : nouveau match, demande d'inscription et
+  signalement (admins), inscription acceptée — clés VAPID générées
+  automatiquement au premier lancement, rien à configurer
 - 🔓 **Réseaux débloqués par le match** : chacun renseigne son Instagram, Snapchat
   et WhatsApp dans son profil ; ils restent secrets et ne sont révélés qu'à tes
   matchs, avec des liens directs. Pas de messagerie interne à surveiller —
@@ -110,7 +116,6 @@ avant un match mutuel.
 
 ## Idées pour la suite
 
-- Notifications push (l'infrastructure service worker est déjà en place)
 - Suppression de compte et des données
-- Filtres par classe ou par centres d'intérêt
 - Vérification email par lien de confirmation
+- Filtre par centres d'intérêt

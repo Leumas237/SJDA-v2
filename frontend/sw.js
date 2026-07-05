@@ -1,5 +1,5 @@
 /* Service worker SJDA : cache de la coquille de l'app (network-first) */
-const CACHE = "sjda-v2";
+const CACHE = "sjda-v3";
 const SHELL = [
   "/",
   "/static/style.css",
@@ -21,6 +21,32 @@ self.addEventListener("activate", (e) => {
     )
   );
   self.clients.claim();
+});
+
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { /* payload non-JSON */ }
+  e.waitUntil(
+    self.registration.showNotification(data.title || "SJDA", {
+      body: data.body || "",
+      icon: "/static/icons/icon-192.png",
+      badge: "/static/icons/icon-192.png",
+      data: { url: data.url || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ("focus" in c) { c.navigate(url); return c.focus(); }
+      }
+      return clients.openWindow(url);
+    })
+  );
 });
 
 self.addEventListener("fetch", (e) => {

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e0446c">
+  <title>SJDA — Rencontres à l'école</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ================= AUTH ================= -->
+    <section id="view-auth" class="view">
+      <div class="auth-card">
+        <h1 class="logo">SJDA <span>❤</span></h1>
+        <p class="tagline">Rencontre les élèves de ton école.<br>Amitié ou plus, si affinités&nbsp;!</p>
+
+        <div class="tabs">
+          <button id="tab-login" class="tab active">Connexion</button>
+          <button id="tab-register" class="tab">Inscription</button>
+        </div>
+
+        <form id="form-login" class="auth-form">
+          <input type="email" id="login-email" placeholder="Email" required autocomplete="email">
+          <input type="password" id="login-password" placeholder="Mot de passe" required autocomplete="current-password">
+          <button type="submit" class="btn-primary">Se connecter</button>
+        </form>
+
+        <form id="form-register" class="auth-form hidden">
+          <input type="text" id="reg-name" placeholder="Prénom" required minlength="2" autocomplete="given-name">
+          <input type="email" id="reg-email" placeholder="Email" required autocomplete="email">
+          <input type="password" id="reg-password" placeholder="Mot de passe (8 caractères min.)" required minlength="8" autocomplete="new-password">
+          <input type="text" id="reg-invite" placeholder="Code d'invitation de l'école">
+          <button type="submit" class="btn-primary">Créer mon compte</button>
+        </form>
+
+        <p id="auth-error" class="error hidden"></p>
+      </div>
+    </section>
+
+    <!-- ================= SWIPE ================= -->
+    <section id="view-discover" class="view hidden">
+      <header class="topbar"><h2>Découvrir</h2></header>
+      <div id="deck" class="deck"></div>
+      <div id="deck-empty" class="empty hidden">
+        <p>😌 Plus personne à découvrir pour l'instant.</p>
+        <p class="muted">Reviens plus tard, ou invite tes camarades&nbsp;!</p>
+      </div>
+      <div class="swipe-actions">
+        <button id="btn-pass" class="round-btn pass" title="Passer">✕</button>
+        <button id="btn-like" class="round-btn like" title="J'aime">❤</button>
+      </div>
+    </section>
+
+    <!-- ================= MATCHS ================= -->
+    <section id="view-matches" class="view hidden">
+      <header class="topbar"><h2>Mes matchs</h2></header>
+      <ul id="matches-list" class="matches-list"></ul>
+      <div id="matches-empty" class="empty hidden">
+        <p>💫 Pas encore de match.</p>
+        <p class="muted">Continue de swiper, ça va venir&nbsp;!</p>
+      </div>
+    </section>
+
+    <!-- ================= CHAT ================= -->
+    <section id="view-chat" class="view hidden">
+      <header class="topbar chat-topbar">
+        <button id="btn-chat-back" class="icon-btn">←</button>
+        <img id="chat-avatar" class="avatar-sm" alt="">
+        <h2 id="chat-name"></h2>
+      </header>
+      <div id="chat-messages" class="chat-messages"></div>
+      <form id="form-chat" class="chat-input">
+        <input type="text" id="chat-text" placeholder="Écris un message…" autocomplete="off" maxlength="2000">
+        <button type="submit" class="btn-send">➤</button>
+      </form>
+    </section>
+
+    <!-- ================= PROFIL ================= -->
+    <section id="view-profile" class="view hidden">
+      <header class="topbar"><h2>Mon profil</h2></header>
+      <form id="form-profile" class="profile-form">
+        <label class="photo-picker">
+          <img id="profile-photo" src="" alt="" class="hidden">
+          <span id="photo-placeholder">📷<br>Ajouter une photo</span>
+          <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" hidden>
+        </label>
+
+        <label>Bio
+          <textarea id="p-bio" maxlength="500" rows="3" placeholder="Parle un peu de toi…"></textarea>
+        </label>
+        <label>Classe
+          <input type="text" id="p-classe" maxlength="40" placeholder="ex. Terminale C">
+        </label>
+        <label>Centres d'intérêt <span class="muted">(séparés par des virgules)</span>
+          <input type="text" id="p-interests" placeholder="foot, musique, dessin…">
+        </label>
+        <label>Je cherche
+          <select id="p-intent">
+            <option value="amis">Des amis 🤝</option>
+            <option value="couple">Une relation 💘</option>
+            <option value="les_deux" selected>Les deux, on verra 😄</option>
+          </select>
+        </label>
+        <label>Je suis
+          <select id="p-gender">
+            <option value="">Je préfère ne pas dire</option>
+            <option value="fille">Une fille</option>
+            <option value="garcon">Un garçon</option>
+            <option value="autre">Autre</option>
+          </select>
+        </label>
+        <label>Intéressé·e par
+          <select id="p-seeking">
+            <option value="tous" selected>Tout le monde</option>
+            <option value="filles">Les filles</option>
+            <option value="garcons">Les garçons</option>
+          </select>
+        </label>
+        <button type="submit" class="btn-primary">Enregistrer</button>
+        <p id="profile-saved" class="success hidden">Profil enregistré ✔</p>
+        <button type="button" id="btn-logout" class="btn-ghost">Se déconnecter</button>
+      </form>
+    </section>
+
+    <!-- ================= NAV ================= -->
+    <nav id="navbar" class="navbar hidden">
+      <button data-view="discover" class="nav-btn active">🔥<span>Découvrir</span></button>
+      <button data-view="matches" class="nav-btn">💬<span>Matchs</span></button>
+      <button data-view="profile" class="nav-btn">👤<span>Profil</span></button>
+    </nav>
+
+    <!-- ================= MATCH POPUP ================= -->
+    <div id="match-popup" class="match-popup hidden">
+      <div class="match-popup-inner">
+        <h2>C'est un match ! 🎉</h2>
+        <p id="match-popup-text"></p>
+        <button id="btn-match-chat" class="btn-primary">Envoyer un message</button>
+        <button id="btn-match-close" class="btn-ghost">Continuer à swiper</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

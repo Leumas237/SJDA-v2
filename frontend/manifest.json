@@ -1,0 +1,15 @@
+{
+  "name": "SJDA — Rencontres à l'école",
+  "short_name": "SJDA",
+  "description": "Rencontre les élèves de ton école : amitié ou plus, si affinités !",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf6f7",
+  "theme_color": "#e0446c",
+  "lang": "fr",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

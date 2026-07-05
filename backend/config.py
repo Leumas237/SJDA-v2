@@ -16,6 +16,14 @@ APP_NAME = os.environ.get("SJDA_APP_NAME", "SJDA")
 EMAIL_DOMAIN = os.environ.get("SJDA_EMAIL_DOMAIN", "").strip().lower()
 INVITE_CODE = os.environ.get("SJDA_INVITE_CODE", "SJDA2026").strip()
 
+# Emails administrateurs (séparés par des virgules) : ces comptes voient
+# le tableau de bord de modération. Ex. SJDA_ADMIN_EMAILS="toi@gmail.com"
+ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("SJDA_ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+
 MAX_PHOTO_BYTES = 5 * 1024 * 1024  # 5 Mo
 SESSION_DAYS = 30
 

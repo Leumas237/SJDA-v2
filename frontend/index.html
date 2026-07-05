@@ -71,6 +71,7 @@
         <button id="btn-chat-back" class="icon-btn">←</button>
         <img id="chat-avatar" class="avatar-sm" alt="">
         <h2 id="chat-name"></h2>
+        <button id="btn-report" class="icon-btn report-btn" title="Signaler et bloquer">⚠️</button>
       </header>
       <div id="chat-messages" class="chat-messages"></div>
       <form id="form-chat" class="chat-input">
@@ -126,11 +127,29 @@
       </form>
     </section>
 
+    <!-- ================= ADMIN ================= -->
+    <section id="view-admin" class="view hidden">
+      <header class="topbar"><h2>🛡️ Modération</h2></header>
+      <div class="admin-body">
+        <div id="admin-stats" class="stats-grid"></div>
+
+        <h3 class="admin-h3">Signalements</h3>
+        <div id="admin-reports"></div>
+
+        <h3 class="admin-h3">Activité en direct</h3>
+        <ul id="admin-feed" class="admin-feed"></ul>
+
+        <h3 class="admin-h3">Élèves inscrits</h3>
+        <div id="admin-users"></div>
+      </div>
+    </section>
+
     <!-- ================= NAV ================= -->
     <nav id="navbar" class="navbar hidden">
       <button data-view="discover" class="nav-btn active">🔥<span>Découvrir</span></button>
       <button data-view="matches" class="nav-btn">💬<span>Matchs</span></button>
       <button data-view="profile" class="nav-btn">👤<span>Profil</span></button>
+      <button data-view="admin" class="nav-btn hidden" id="nav-admin">🛡️<span>Modération</span></button>
     </nav>
 
     <!-- ================= MATCH POPUP ================= -->

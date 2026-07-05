@@ -189,6 +189,40 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
 .nav-btn span { font-size: 0.7rem; }
 .nav-btn.active { color: var(--primary); }
 
+/* ---------- admin ---------- */
+.admin-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 auto; width: 100%; }
+.admin-h3 { margin-top: 10px; font-size: 1rem; }
+.admin-pad { padding: 6px 2px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.stat {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px; text-align: center; display: flex; flex-direction: column; gap: 2px;
+}
+.stat b { font-size: 1.3rem; }
+.stat span { font-size: 0.75rem; color: var(--muted); }
+.stat.alert { border-color: var(--pass); background: #fdeeee; }
+.admin-feed { list-style: none; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; max-height: 220px; overflow-y: auto; font-size: 0.88rem; display: flex; flex-direction: column; gap: 6px; }
+.feed-alert { color: var(--pass); font-weight: 600; }
+.report-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; font-size: 0.92rem; }
+.report-card.pending { border-color: var(--pass); }
+.r-head { margin-bottom: 4px; }
+.r-reason { color: var(--muted); font-style: italic; margin-bottom: 6px; }
+.r-msg { padding: 4px 0; border-top: 1px dashed var(--border); font-size: 0.88rem; }
+.r-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.btn-mini {
+  padding: 8px 12px; font-size: 0.85rem; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--card); cursor: pointer; color: var(--text);
+}
+.btn-mini.danger { background: var(--pass); border-color: var(--pass); color: #fff; }
+.user-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; margin-bottom: 6px; font-size: 0.9rem;
+}
+.user-row.banned { opacity: 0.6; }
+.u-info { display: flex; flex-direction: column; }
+.report-btn { margin-left: auto; }
+
 /* ---------- match popup ---------- */
 .match-popup {
   position: fixed; inset: 0; z-index: 50;

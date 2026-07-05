@@ -53,4 +53,16 @@ def current_user_id(request: Request) -> int:
     return user_id
 
 
+def current_admin_id(request: Request) -> int:
+    user_id = current_user_id(request)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT is_admin FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    if not row or not row["is_admin"]:
+        raise HTTPException(status_code=403, detail="Réservé aux administrateurs")
+    return user_id
+
+
 CurrentUser = Depends(current_user_id)
+CurrentAdmin = Depends(current_admin_id)

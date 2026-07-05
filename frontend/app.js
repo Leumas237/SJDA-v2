@@ -31,7 +31,7 @@ async function api(path, options = {}) {
 
 /* ---------------- navigation ---------------- */
 
-const VIEWS = ["auth", "discover", "matches", "chat", "profile"];
+const VIEWS = ["auth", "discover", "matches", "chat", "profile", "admin"];
 
 function show(view) {
   VIEWS.forEach((v) => $("view-" + v).classList.toggle("hidden", v !== view));
@@ -49,6 +49,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     if (v === "discover") loadDeck();
     if (v === "matches") loadMatches();
     if (v === "profile") fillProfileForm();
+    if (v === "admin") loadAdmin();
   });
 });
 
@@ -103,6 +104,7 @@ async function onLoggedIn(data, isNew = false) {
   localStorage.setItem("sjda_token", data.token);
   localStorage.setItem("sjda_user_id", data.user_id);
   state.me = await api("/me");
+  applyAdminUi();
   connectWs();
   if (isNew) { show("profile"); fillProfileForm(); }
   else { show("discover"); loadDeck(); }
@@ -331,6 +333,21 @@ async function openChat(m) {
 
 $("btn-chat-back").onclick = () => { show("matches"); loadMatches(); };
 
+$("btn-report").onclick = async () => {
+  const c = state.currentChat;
+  if (!c) return;
+  const reason = prompt(
+    `Signaler ${c.profile.name} aux modérateurs ?\n` +
+    "La conversation sera fermée et vous ne vous verrez plus.\n\n" +
+    "Explique brièvement le problème :"
+  );
+  if (reason === null) return;
+  await api("/report", { method: "POST", json: { match_id: c.matchId, reason } });
+  alert("Signalement envoyé. Merci de contribuer à la sécurité de tous 💛");
+  show("matches");
+  loadMatches();
+};
+
 async function fetchNewMessages() {
   const c = state.currentChat;
   if (!c) return;
@@ -369,6 +386,93 @@ function stopChatPolling() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
 }
 
+/* ---------------- admin ---------------- */
+
+function applyAdminUi() {
+  $("nav-admin").classList.toggle("hidden", !(state.me && state.me.is_admin));
+}
+
+async function loadAdmin() {
+  const [overview, reports, users] = await Promise.all([
+    api("/admin/overview"), api("/admin/reports"), api("/admin/users"),
+  ]);
+  renderAdminStats(overview.stats);
+  $("admin-feed").innerHTML = "";
+  overview.feed.forEach((ev) => appendFeedItem(ev, false));
+  renderAdminReports(reports);
+  renderAdminUsers(users);
+}
+
+function renderAdminStats(s) {
+  $("admin-stats").innerHTML = `
+    <div class="stat"><b>${s.users}</b><span>élèves</span></div>
+    <div class="stat"><b>${s.matches}</b><span>matchs</span></div>
+    <div class="stat"><b>${s.messages}</b><span>messages</span></div>
+    <div class="stat ${s.pending_reports ? "alert" : ""}"><b>${s.pending_reports}</b><span>signalements</span></div>
+    <div class="stat"><b>${s.banned}</b><span>bannis</span></div>`;
+}
+
+function appendFeedItem(ev, prepend = true) {
+  const li = document.createElement("li");
+  li.textContent = `${ev.created_at.slice(11, 16)} — ${ev.text}`;
+  if (ev.type === "report") li.classList.add("feed-alert");
+  const feed = $("admin-feed");
+  prepend ? feed.prepend(li) : feed.appendChild(li);
+  while (feed.children.length > 40) feed.lastElementChild.remove();
+}
+
+function renderAdminReports(reports) {
+  const box = $("admin-reports");
+  box.innerHTML = reports.length ? "" : '<p class="muted admin-pad">Aucun signalement 🎉</p>';
+  reports.forEach((r) => {
+    const div = document.createElement("div");
+    div.className = "report-card" + (r.status === "pending" ? " pending" : "");
+    const msgs = (r.messages || [])
+      .map((m) => `<div class="r-msg">${m.sender_id === r.reported_id ? "🔴" : "⚪"} ${escapeHtml(m.content)}</div>`)
+      .join("");
+    const statusLabel = { pending: "⏳ En attente", banned: "🚫 Banni", dismissed: "✔ Classé" }[r.status];
+    div.innerHTML = `
+      <div class="r-head"><b>${escapeHtml(r.reporter_name)}</b> signale <b>${escapeHtml(r.reported_name)}</b>
+        <span class="muted">${statusLabel}</span></div>
+      ${r.reason ? `<div class="r-reason">« ${escapeHtml(r.reason)} »</div>` : ""}
+      ${msgs ? `<details><summary>Voir la conversation signalée</summary>${msgs}</details>` : ""}
+      ${r.status === "pending" ? `
+        <div class="r-actions">
+          <button class="btn-mini danger" data-act="ban">Bannir ${escapeHtml(r.reported_name)}</button>
+          <button class="btn-mini" data-act="dismiss">Classer sans suite</button>
+        </div>` : ""}`;
+    div.querySelectorAll("[data-act]").forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/admin/reports/${r.id}`, { method: "POST", json: { action: btn.dataset.act } });
+        loadAdmin();
+      };
+    });
+    box.appendChild(div);
+  });
+}
+
+function renderAdminUsers(users) {
+  const box = $("admin-users");
+  box.innerHTML = "";
+  users.forEach((u) => {
+    const div = document.createElement("div");
+    div.className = "user-row" + (u.banned ? " banned" : "");
+    div.innerHTML = `
+      <div class="u-info">
+        <b>${escapeHtml(u.name)}</b> ${u.is_admin ? "🛡️" : ""} ${u.banned ? "🚫" : ""}
+        <span class="muted">${escapeHtml(u.email)}${u.classe ? " · " + escapeHtml(u.classe) : ""}</span>
+      </div>
+      ${u.id !== state.userId ? `<button class="btn-mini ${u.banned ? "" : "danger"}">${u.banned ? "Rétablir" : "Bannir"}</button>` : ""}`;
+    const btn = div.querySelector("button");
+    if (btn) btn.onclick = async () => {
+      if (!u.banned && !confirm(`Bannir ${u.name} ? Son compte sera immédiatement suspendu.`)) return;
+      await api(`/admin/users/${u.id}/ban`, { method: "POST", json: { banned: !u.banned } });
+      loadAdmin();
+    };
+    box.appendChild(div);
+  });
+}
+
 /* ---------------- websocket ---------------- */
 
 function connectWs() {
@@ -382,6 +486,13 @@ function connectWs() {
     } else if (data.type === "match") {
       // rafraîchit la liste si on est dessus
       if (!$("view-matches").classList.contains("hidden")) loadMatches();
+    } else if (data.type === "activity") {
+      // flux de modération en direct (admins uniquement)
+      if (!$("view-admin").classList.contains("hidden")) {
+        appendFeedItem(data.event);
+        api("/admin/overview").then((o) => renderAdminStats(o.stats)).catch(() => {});
+        if (data.event.type === "report") api("/admin/reports").then(renderAdminReports).catch(() => {});
+      }
     }
   };
   ws.onclose = () => { state.ws = null; setTimeout(connectWs, 5000); };
@@ -404,6 +515,7 @@ if ("serviceWorker" in navigator) {
   if (state.token) {
     try {
       state.me = await api("/me");
+      applyAdminUi();
       connectWs();
       show("discover");
       loadDeck();

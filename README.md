@@ -13,6 +13,8 @@ sortir de leur bulle : se faire des amis, ou peut-être plus, si affinités !
 - 🏫 **Réservé à l'école** : inscription protégée par un code d'invitation
   et/ou le domaine email de l'école
 - 📱 **PWA** : installable sur l'écran d'accueil, fonctionne sur tous les téléphones
+- 🛡️ **Modération en temps réel** : tableau de bord admin avec statistiques,
+  fil d'activité en direct, traitement des signalements et bannissement
 
 ## Lancer en local
 
@@ -33,6 +35,7 @@ Puis ouvre http://localhost:8000 — sur téléphone, utilise l'IP de ton PC
 |---|---|---|
 | `SJDA_INVITE_CODE` | `SJDA2026` | Code d'invitation à partager aux élèves |
 | `SJDA_EMAIL_DOMAIN` | *(vide)* | Ex. `monecole.fr` : les emails de ce domaine s'inscrivent sans code |
+| `SJDA_ADMIN_EMAILS` | *(vide)* | Emails des modérateurs, séparés par des virgules |
 | `SJDA_APP_NAME` | `SJDA` | Nom affiché de l'app |
 | `SJDA_DATA_DIR` | `./data` | Dossier de la base SQLite et des photos |
 
@@ -54,6 +57,25 @@ frontend/         PWA en HTML/CSS/JS vanilla (aucun build nécessaire)
   manifest.json   Manifeste PWA
 ```
 
+## Modération
+
+Déclare les comptes modérateurs avec `SJDA_ADMIN_EMAILS` (l'onglet 🛡️
+Modération apparaît pour eux). Le tableau de bord montre :
+
+- les **statistiques** (élèves, matchs, messages, signalements, bannis)
+- un **fil d'activité en direct** (inscriptions, matchs, signalements —
+  poussé par WebSocket, sans recharger la page)
+- les **signalements** : chaque élève peut signaler un match via le bouton ⚠️
+  du chat ; la conversation est fermée immédiatement et les deux ne se
+  recroisent plus. L'admin voit le motif et l'extrait de conversation, puis
+  bannit ou classe sans suite
+- la **liste des élèves** avec bannissement/rétablissement en un clic
+  (le bannissement coupe les sessions et bloque la connexion)
+
+Respect de la vie privée : les admins **ne peuvent pas lire les conversations
+privées** — seuls les échanges d'un match signalé deviennent visibles, et
+uniquement parce qu'un des deux membres l'a demandé.
+
 ## Sécurité & vie privée
 
 - Mots de passe hachés (PBKDF2, 200 000 itérations), jamais stockés en clair
@@ -65,7 +87,6 @@ frontend/         PWA en HTML/CSS/JS vanilla (aucun build nécessaire)
 ## Idées pour la suite
 
 - Notifications push (l'infrastructure service worker est déjà en place)
-- Signalement / blocage d'un utilisateur
 - Suppression de compte et des données
 - Filtres par classe ou par centres d'intérêt
 - Vérification email par lien de confirmation

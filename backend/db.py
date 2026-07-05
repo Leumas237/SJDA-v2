@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
     name          TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
+    banned        INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -43,8 +45,26 @@ CREATE TABLE IF NOT EXISTS matches (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_a     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user_b     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    closed     INTEGER NOT NULL DEFAULT 0,           -- 1 = fermé après signalement
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_a, user_b)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reported_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    match_id    INTEGER REFERENCES matches(id) ON DELETE SET NULL,
+    reason      TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',     -- pending | banned | dismissed
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS activity (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL,                        -- signup | match | report | ban
+    text       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -58,9 +78,23 @@ CREATE INDEX IF NOT EXISTS idx_messages_match ON messages(match_id, id);
 """
 
 
+# Pour les bases créées avant l'ajout de ces colonnes ; l'échec
+# "duplicate column" sur une base récente est normal et ignoré.
+MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE matches ADD COLUMN closed INTEGER NOT NULL DEFAULT 0",
+]
+
+
 def init_db() -> None:
     with get_db() as db:
         db.executescript(SCHEMA)
+        for stmt in MIGRATIONS:
+            try:
+                db.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
 
 
 @contextmanager

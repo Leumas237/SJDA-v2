@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     photo     TEXT NOT NULL DEFAULT '',            -- nom de fichier dans uploads/
     instagram TEXT NOT NULL DEFAULT '',            -- réseaux : visibles
     snapchat  TEXT NOT NULL DEFAULT '',            -- uniquement après match
-    whatsapp  TEXT NOT NULL DEFAULT ''
+    whatsapp  TEXT NOT NULL DEFAULT '',
+    age       INTEGER NOT NULL DEFAULT 0           -- 0 = non renseigné
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -85,6 +86,7 @@ MIGRATIONS = [
     "ALTER TABLE profiles ADD COLUMN instagram TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE profiles ADD COLUMN snapchat TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE profiles ADD COLUMN whatsapp TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE profiles ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
 ]
 
 

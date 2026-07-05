@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#e0446c">
+  <meta name="theme-color" content="#fd267a">
   <title>SJDA — Rencontres à l'école</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
@@ -15,7 +15,7 @@
     <!-- ================= AUTH ================= -->
     <section id="view-auth" class="view">
       <div class="auth-card">
-        <h1 class="logo">SJDA <span>❤</span></h1>
+        <h1 class="logo">🔥 SJDA</h1>
         <p class="tagline">Rencontre les élèves de ton école.<br>Amitié ou plus, si affinités&nbsp;!</p>
 
         <div class="tabs">
@@ -43,21 +43,28 @@
 
     <!-- ================= SWIPE ================= -->
     <section id="view-discover" class="view hidden">
-      <header class="topbar"><h2>Découvrir</h2></header>
+      <header class="topbar brand-bar"><h1 class="brand">🔥 SJDA</h1></header>
       <div id="deck" class="deck"></div>
       <div id="deck-empty" class="empty hidden">
         <p>😌 Plus personne à découvrir pour l'instant.</p>
         <p class="muted">Reviens plus tard, ou invite tes camarades&nbsp;!</p>
       </div>
       <div class="swipe-actions">
+        <button id="btn-rewind" class="round-btn sm rewind" title="Annuler le dernier swipe">↺</button>
         <button id="btn-pass" class="round-btn pass" title="Passer">✕</button>
+        <button id="btn-super" class="round-btn sm super" title="Super Like">★</button>
         <button id="btn-like" class="round-btn like" title="J'aime">❤</button>
       </div>
     </section>
 
     <!-- ================= MATCHS ================= -->
     <section id="view-matches" class="view hidden">
-      <header class="topbar"><h2>Mes matchs</h2></header>
+      <header class="topbar brand-bar"><h1 class="brand">🔥 SJDA</h1></header>
+      <div id="new-matches-wrap" class="new-matches-wrap hidden">
+        <h3 class="section-label">Nouveaux matchs</h3>
+        <div id="new-matches" class="new-matches"></div>
+      </div>
+      <h3 class="section-label">Mes matchs</h3>
       <ul id="matches-list" class="matches-list"></ul>
       <div id="matches-empty" class="empty hidden">
         <p>💫 Pas encore de match.</p>
@@ -92,8 +99,11 @@
         <label>Bio
           <textarea id="p-bio" maxlength="500" rows="3" placeholder="Parle un peu de toi…"></textarea>
         </label>
+        <label>Âge
+          <input type="number" id="p-age" min="15" max="30" placeholder="ex. 19">
+        </label>
         <label>Classe
-          <input type="text" id="p-classe" maxlength="40" placeholder="ex. Terminale C">
+          <input type="text" id="p-classe" maxlength="40" placeholder="ex. MPSI">
         </label>
         <label>Centres d'intérêt <span class="muted">(séparés par des virgules)</span>
           <input type="text" id="p-interests" placeholder="foot, musique, dessin…">
@@ -169,12 +179,13 @@
     </nav>
 
     <!-- ================= MATCH POPUP ================= -->
-    <div id="match-popup" class="match-popup hidden">
-      <div class="match-popup-inner">
-        <h2>C'est un match ! 🎉</h2>
+    <div id="match-popup" class="match-popup match-screen hidden">
+      <div class="match-screen-inner">
+        <h2 class="match-title">C'est un Match&nbsp;!</h2>
+        <div id="match-avatars" class="match-avatars"></div>
         <p id="match-popup-text"></p>
-        <button id="btn-match-socials" class="btn-primary">Voir ses réseaux 🔓</button>
-        <button id="btn-match-close" class="btn-ghost">Continuer à swiper</button>
+        <button id="btn-match-socials" class="btn-light">Voir ses réseaux 🔓</button>
+        <button id="btn-match-close" class="btn-ghost-light">Continuer à swiper</button>
       </div>
     </div>
 

@@ -54,11 +54,13 @@ class ProfileIn(BaseModel):
     instagram: str = Field(default="", max_length=60)
     snapchat: str = Field(default="", max_length=60)
     whatsapp: str = Field(default="", max_length=25)
+    age: int = Field(default=0, ge=0, le=99)
 
 
 class SwipeIn(BaseModel):
     target_id: int
     liked: bool
+    super_like: bool = False
 
 
 class ReportIn(BaseModel):
@@ -93,6 +95,7 @@ def profile_dict(row, socials: bool = False) -> dict:
         "gender": row["gender"],
         "seeking": row["seeking"],
         "photo": f"/uploads/{row['photo']}" if row["photo"] else "",
+        "age": row["age"] or None,
     }
     if socials:
         d["instagram"] = row["instagram"]
@@ -227,6 +230,8 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
         raise HTTPException(status_code=422, detail="Genre invalide")
     if body.seeking not in VALID_SEEKING:
         raise HTTPException(status_code=422, detail="Préférence invalide")
+    if body.age and not (15 <= body.age <= 30):
+        raise HTTPException(status_code=422, detail="Âge entre 15 et 30 ans")
     interests = [t.strip()[:30] for t in body.interests if t.strip()][:12]
     instagram = body.instagram.strip().lstrip("@")
     snapchat = body.snapchat.strip().lstrip("@")
@@ -234,8 +239,8 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
     with get_db() as db:
         db.execute(
             "UPDATE profiles SET bio = ?, classe = ?, interests = ?, intent = ?, "
-            "gender = ?, seeking = ?, instagram = ?, snapchat = ?, whatsapp = ? "
-            "WHERE user_id = ?",
+            "gender = ?, seeking = ?, instagram = ?, snapchat = ?, whatsapp = ?, "
+            "age = ? WHERE user_id = ?",
             (
                 body.bio.strip(),
                 body.classe.strip(),
@@ -246,6 +251,7 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
                 instagram,
                 snapchat,
                 whatsapp,
+                body.age,
                 user_id,
             ),
         )
@@ -301,6 +307,13 @@ def discover(user_id: int = auth.CurrentApproved):
             "ORDER BY RANDOM() LIMIT 30",
             (user_id, user_id),
         ).fetchall()
+        superlikers = {
+            r["swiper_id"]
+            for r in db.execute(
+                "SELECT swiper_id FROM swipes WHERE target_id = ? AND liked = 2",
+                (user_id,),
+            ).fetchall()
+        }
     candidates = []
     for row in rows:
         if not intents_compatible(my["intent"], row["intent"]):
@@ -312,7 +325,11 @@ def discover(user_id: int = auth.CurrentApproved):
             and seeking_ok(row["seeking"], my["gender"])
         ):
             continue
-        candidates.append(profile_dict(row))
+        candidates.append(
+            {**profile_dict(row), "superliked_you": row["user_id"] in superlikers}
+        )
+    # ceux qui t'ont super liké passent en tête de pile
+    candidates.sort(key=lambda c: not c["superliked_you"])
     return candidates[:15]
 
 
@@ -326,15 +343,16 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+        liked_val = 2 if (body.liked and body.super_like) else int(body.liked)
         db.execute(
             "INSERT OR REPLACE INTO swipes (swiper_id, target_id, liked) VALUES (?, ?, ?)",
-            (user_id, body.target_id, int(body.liked)),
+            (user_id, body.target_id, liked_val),
         )
         matched = False
         match_id = None
         if body.liked:
             reciprocal = db.execute(
-                "SELECT 1 FROM swipes WHERE swiper_id = ? AND target_id = ? AND liked = 1",
+                "SELECT 1 FROM swipes WHERE swiper_id = ? AND target_id = ? AND liked >= 1",
                 (body.target_id, user_id),
             ).fetchone()
             if reciprocal:
@@ -357,6 +375,32 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
     if matched:
         notify_user(body.target_id, {"type": "match", "match_id": match_id})
     return {"matched": matched, "match_id": match_id}
+
+
+@app.post("/api/rewind")
+def rewind(user_id: int = auth.CurrentApproved):
+    """Annule le dernier swipe (façon Tinder) et rend la carte."""
+    with get_db() as db:
+        last = db.execute(
+            "SELECT * FROM swipes WHERE swiper_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if not last:
+            raise HTTPException(status_code=404, detail="Rien à annuler")
+        db.execute(
+            "DELETE FROM swipes WHERE swiper_id = ? AND target_id = ?",
+            (user_id, last["target_id"]),
+        )
+        # si ce swipe avait créé un match, on le retire aussi
+        a, b = sorted((user_id, last["target_id"]))
+        db.execute("DELETE FROM matches WHERE user_a = ? AND user_b = ?", (a, b))
+        row = db.execute(
+            "SELECT p.*, u.name FROM profiles p JOIN users u ON u.id = p.user_id "
+            "WHERE p.user_id = ?",
+            (last["target_id"],),
+        ).fetchone()
+    return {"profile": profile_dict(row)}
 
 
 # ---------------------------------------------------------------- matchs

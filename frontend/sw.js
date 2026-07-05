@@ -1,5 +1,5 @@
 /* Service worker SJDA : cache de la coquille de l'app (network-first) */
-const CACHE = "sjda-v1";
+const CACHE = "sjda-v2";
 const SHELL = [
   "/",
   "/static/style.css",

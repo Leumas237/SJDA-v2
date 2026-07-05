@@ -159,6 +159,7 @@ function stopApprovalPolling() {
 function fillProfileForm() {
   const p = state.me || {};
   $("p-bio").value = p.bio || "";
+  $("p-age").value = p.age || "";
   $("p-classe").value = p.classe || "";
   $("p-interests").value = (p.interests || []).join(", ");
   $("p-intent").value = p.intent || "les_deux";
@@ -188,6 +189,7 @@ $("form-profile").addEventListener("submit", async (e) => {
     method: "PUT",
     json: {
       bio: $("p-bio").value,
+      age: Number($("p-age").value) || 0,
       classe: $("p-classe").value,
       interests: $("p-interests").value.split(",").map((s) => s.trim()).filter(Boolean),
       intent: $("p-intent").value,
@@ -235,17 +237,22 @@ function makeCard(p) {
   const card = document.createElement("div");
   card.className = "card" + (p.photo ? "" : " no-photo");
   if (p.photo) card.style.backgroundImage = `url(${p.photo})`;
+  else card.dataset.initial = (p.name || "?")[0].toUpperCase();
   card.dataset.userId = p.user_id;
   const interests = (p.interests || [])
     .map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join("");
+  const superBadge = p.superliked_you
+    ? '<span class="badge superliked">★ T\'a super liké</span>' : "";
+  const age = p.age ? `<span class="age">, ${p.age}</span>` : "";
   card.innerHTML = `
-    <div class="stamp like">J'AIME</div>
-    <div class="stamp pass">NON</div>
+    <div class="stamp like">LIKE</div>
+    <div class="stamp pass">NOPE</div>
+    <div class="stamp superstamp">SUPER LIKE</div>
     <div class="card-info">
-      <h3>${escapeHtml(p.name)}</h3>
+      <h3>${escapeHtml(p.name)}${age}</h3>
       <div class="card-sub">${escapeHtml(p.classe || "")}</div>
       <div>${escapeHtml(p.bio || "")}</div>
-      <div class="badges"><span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
+      <div class="badges">${superBadge}<span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
     </div>`;
   return card;
 }
@@ -256,7 +263,7 @@ function attachDrag() {
   const card = topCard();
   if (!card || card.dataset.dragBound) return;
   card.dataset.dragBound = "1";
-  let startX = 0, startY = 0, dx = 0, dragging = false;
+  let startX = 0, startY = 0, dx = 0, dy = 0, dragging = false;
 
   const onDown = (e) => {
     dragging = true;
@@ -269,21 +276,25 @@ function attachDrag() {
     const x = (e.touches ? e.touches[0] : e).clientX;
     const y = (e.touches ? e.touches[0] : e).clientY;
     dx = x - startX;
-    card.style.transform = `translate(${dx}px, ${y - startY}px) rotate(${dx / 18}deg)`;
-    card.querySelector(".stamp.like").style.opacity = Math.max(0, dx / 90);
-    card.querySelector(".stamp.pass").style.opacity = Math.max(0, -dx / 90);
+    dy = y - startY;
+    card.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 18}deg)`;
+    const superIntent = dy < -60 && Math.abs(dx) < 80;
+    card.querySelector(".stamp.like").style.opacity = superIntent ? 0 : Math.max(0, dx / 90);
+    card.querySelector(".stamp.pass").style.opacity = superIntent ? 0 : Math.max(0, -dx / 90);
+    card.querySelector(".stamp.superstamp").style.opacity = superIntent ? Math.min(1, -dy / 140) : 0;
   };
   const onUp = () => {
     if (!dragging) return;
     dragging = false;
-    if (dx > 100) swipeTop(true);
+    if (dy < -120 && Math.abs(dx) < 80) swipeTop(true, true); // swipe haut = Super Like
+    else if (dx > 100) swipeTop(true);
     else if (dx < -100) swipeTop(false);
     else {
       card.style.transition = "transform 0.25s";
       card.style.transform = "";
       card.querySelectorAll(".stamp").forEach((s) => (s.style.opacity = 0));
     }
-    dx = 0;
+    dx = 0; dy = 0;
   };
 
   card.addEventListener("pointerdown", onDown);
@@ -291,13 +302,16 @@ function attachDrag() {
   window.addEventListener("pointerup", onUp);
 }
 
-async function swipeTop(liked) {
+async function swipeTop(liked, superLike = false) {
   const card = topCard();
   if (!card) return;
   const targetId = Number(card.dataset.userId);
   card.style.transition = "transform 0.35s ease-in";
-  card.style.transform = `translate(${liked ? 1 : -1} * 120vw, -30px) rotate(${liked ? 20 : -20}deg)`;
-  card.style.transform = `translate(${liked ? "120vw" : "-120vw"}, -30px) rotate(${liked ? 20 : -20}deg)`;
+  if (superLike) {
+    card.style.transform = "translate(0, -130vh) rotate(0deg)";
+  } else {
+    card.style.transform = `translate(${liked ? "120vw" : "-120vw"}, -30px) rotate(${liked ? 20 : -20}deg)`;
+  }
   setTimeout(() => card.remove(), 300);
 
   const swiped = state.deck.shift();
@@ -313,17 +327,31 @@ async function swipeTop(liked) {
   }
 
   try {
-    const res = await api("/swipe", { method: "POST", json: { target_id: targetId, liked } });
+    const res = await api("/swipe", {
+      method: "POST",
+      json: { target_id: targetId, liked, super_like: superLike },
+    });
     if (res.matched) showMatchPopup(swiped, res.match_id);
   } catch (err) { console.error(err); }
 }
 
 $("btn-like").onclick = () => swipeTop(true);
 $("btn-pass").onclick = () => swipeTop(false);
+$("btn-super").onclick = () => swipeTop(true, true);
+
+$("btn-rewind").onclick = async () => {
+  try {
+    const res = await api("/rewind", { method: "POST" });
+    state.deck.unshift(res.profile);
+    renderDeck();
+  } catch { /* rien à annuler */ }
+};
 
 function showMatchPopup(profile, matchId) {
   $("match-popup-text").textContent =
     `${profile.name} et toi vous êtes likés mutuellement. Ses réseaux sont débloqués !`;
+  $("match-avatars").innerHTML =
+    avatarHtml(state.me || {}, "avatar") + avatarHtml(profile, "avatar");
   $("match-popup").classList.remove("hidden");
   $("btn-match-socials").onclick = async () => {
     $("match-popup").classList.add("hidden");
@@ -342,6 +370,19 @@ async function loadMatches() {
   const list = $("matches-list");
   list.innerHTML = "";
   $("matches-empty").classList.toggle("hidden", matches.length > 0);
+
+  // rangée "Nouveaux matchs" façon Tinder (les 10 plus récents)
+  const row = $("new-matches");
+  row.innerHTML = "";
+  $("new-matches-wrap").classList.toggle("hidden", matches.length === 0);
+  matches.slice(0, 10).forEach((m) => {
+    const div = document.createElement("div");
+    div.className = "new-match";
+    div.innerHTML = `${avatarHtml(m.profile, "avatar")}<span>${escapeHtml(m.profile.name)}</span>`;
+    div.onclick = () => openMatchDetail(m);
+    row.appendChild(div);
+  });
+
   matches.forEach((m) => {
     const li = document.createElement("li");
     li.className = "match-item";

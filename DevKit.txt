@@ -1,0 +1,558 @@
+════════════════════════════════════════════════════════════════════════
+  DEVKIT — SJDA (Saint Jean Dating App)
+  Lettre au développeur : tout ce qu'il faut savoir pour reprendre,
+  modifier et mettre en ligne cette application.
+════════════════════════════════════════════════════════════════════════
+
+Salut !
+
+Tu tiens entre les mains une PWA de rencontre réservée aux élèves de
+l'Institut Saint Jean. Ce document t'explique TOUT : comment le code
+fonctionne, comment le déployer, et comment changer n'importe quoi —
+du logo au nom de l'app en passant par les couleurs et les règles du jeu.
+Prends 20 minutes pour le lire en entier avant de toucher au code : il
+t'évitera tous les pièges connus.
+
+
+──────────────────────────────────────────────────────────────────────
+1. PHILOSOPHIE DU PROJET
+──────────────────────────────────────────────────────────────────────
+
+• AUCUN build. Pas de npm, pas de webpack, pas de framework front.
+  Le frontend est du HTML/CSS/JS pur servi tel quel par le backend.
+  Tu modifies un fichier, tu recharges la page, c'est en ligne.
+
+• UN SEUL processus. FastAPI sert à la fois l'API (préfixe /api), le
+  WebSocket (/ws) et les fichiers statiques du frontend. Pas de nginx
+  obligatoire, pas de CORS à gérer (même origine).
+
+• UNE SEULE dépendance d'état : le dossier data/. Il contient la base
+  SQLite, les photos de profil, les cartes d'étudiant du KYI et les
+  clés de notification push. Sauvegarde ce dossier = sauvegarde tout.
+
+• Petite échelle assumée : SQLite et un process unique suffisent
+  largement pour une école (des centaines d'utilisateurs, pas des
+  millions). Si un jour ça explose : PostgreSQL + stockage objet,
+  mais n'optimise pas avant d'en avoir besoin.
+
+
+──────────────────────────────────────────────────────────────────────
+2. ARBORESCENCE
+──────────────────────────────────────────────────────────────────────
+
+backend/
+  main.py      ← 90 % de la logique : toutes les routes API, le
+                 WebSocket, les règles métier (match, quota, KYI…)
+  auth.py      ← mots de passe (PBKDF2), sessions par jeton, et les
+                 3 niveaux d'accès : CurrentUser / CurrentApproved /
+                 CurrentAdmin (dépendances FastAPI)
+  db.py        ← schéma SQLite (SCHEMA) + migrations additives
+                 (MIGRATIONS) + get_db(), le context manager de connexion
+  config.py    ← toute la configuration, lue depuis les variables
+                 d'environnement avec des valeurs par défaut
+  push.py      ← notifications Web Push (VAPID) ; génère et stocke les
+                 clés tout seul au premier démarrage
+
+frontend/
+  index.html   ← TOUTES les vues dans un seul fichier (sections <section
+                 id="view-*">), montrées/cachées par JS
+  app.js       ← toute la logique client : navigation, swipe tactile,
+                 appels API, WebSocket, push, admin
+  style.css    ← tout le style ; les couleurs sont des variables CSS
+                 dans :root (voir §9 personnalisation)
+  sw.js        ← service worker : cache hors-ligne + réception des push
+  manifest.json← manifeste PWA (nom, couleurs, icônes)
+  icons/       ← icônes PNG 192 et 512 (voir §9 pour les régénérer)
+
+data/          ← créé automatiquement au premier lancement (gitignoré)
+  sjda.db          base SQLite
+  uploads/         photos de profil (servies publiquement sur /uploads)
+  kyi/             cartes d'étudiant (JAMAIS servies publiquement)
+  vapid_private.pem clés de push (à sauvegarder ! si tu les perds, tous
+                    les abonnements push existants deviennent invalides)
+
+Dockerfile     ← pour la mise en ligne (voir §10)
+requirements.txt
+
+
+──────────────────────────────────────────────────────────────────────
+3. LANCER EN LOCAL
+──────────────────────────────────────────────────────────────────────
+
+  pip install -r requirements.txt
+  SJDA_ADMIN_EMAILS=ton@email.com uvicorn backend.main:app --reload --port 8000
+
+Ouvre http://localhost:8000. Inscris-toi avec ton@email.com (n'importe
+quel mot de passe ≥ 8 caractères) : tu es admin et validé d'office.
+Le flag --reload redémarre le serveur à chaque modification du backend ;
+pour le frontend, un simple rechargement de page suffit (en local le
+service worker peut servir du cache : ouvre les DevTools → Application →
+Service Workers → "Update on reload" pendant que tu développes).
+
+Pour tester à plusieurs : crée d'autres comptes dans des fenêtres de
+navigation privée, avec des emails des domaines autorisés.
+
+
+──────────────────────────────────────────────────────────────────────
+4. CONFIGURATION (variables d'environnement)
+──────────────────────────────────────────────────────────────────────
+
+  SJDA_APP_NAME          Nom de l'app côté serveur (défaut "SJDA")
+  SJDA_EMAIL_DOMAINS     Domaines email autorisés à l'inscription,
+                         séparés par des virgules. Défaut : les 7
+                         domaines Saint Jean (institutsaintjean.org,
+                         cpgesaintjean.org, universitesaintjean.org,
+                         prepavogt.org, saintjeaningenieur.org,
+                         saintjeanmanagement.org, prepasaintjean.org)
+  SJDA_MOD_CODE          Code modérateur SECRET. Vide par défaut =
+                         désactivé. Fourni dans le champ « Code
+                         d'invitation (optionnel) » à l'inscription,
+                         il rend le compte modérateur + validé d'office
+                         + dispense de l'email étudiant. À garder
+                         confidentiel absolument.
+  SJDA_ADMIN_EMAILS      Emails toujours admins (séparés par des
+                         virgules). Promus automatiquement à la
+                         connexion s'ils ne le sont pas encore.
+  SJDA_DAILY_LIKES       Quota de likes par jour (défaut 15)
+  SJDA_SPAM_STRIKES_BAN  Tentatives de like AU-DELÀ du quota avant
+                         suspension automatique pour spam (défaut 30)
+  SJDA_DATA_DIR          Emplacement du dossier data (défaut ./data)
+
+Toutes sont lues dans backend/config.py — c'est le seul fichier à lire
+pour savoir ce qui est configurable.
+
+
+──────────────────────────────────────────────────────────────────────
+5. BASE DE DONNÉES (SQLite)
+──────────────────────────────────────────────────────────────────────
+
+Schéma dans backend/db.py. Les tables :
+
+  users      id, email (unique), password_hash + salt (PBKDF2-SHA256,
+             200 000 itérations), name, is_admin, banned, approved,
+             last_seen (badge « actif récemment »), spam_strikes
+  profiles   1-à-1 avec users : bio, classe, interests (JSON), intent
+             (amis|couple|les_deux), gender, seeking, instagram,
+             snapchat, whatsapp, age, invisible, photo (legacy, ancien
+             système mono-photo, gardé pour compatibilité)
+  photos     photos de profil multiples (max 6, ordonnées par position)
+  kyi        dossier d'identité : full_name, birthdate, classe,
+             card_photo (nom du fichier dans data/kyi/)
+  sessions   jetons opaques (Authorization: Bearer <token>) ; supprimer
+             la ligne = déconnecter l'appareil
+  swipes     (swiper_id, target_id) → liked 0/1, created_at. C'est LA
+             table centrale : elle porte la découverte (exclusion des
+             déjà-swipés), le quota quotidien, et le blocage mutuel
+             après signalement (paires liked=0 dans les deux sens)
+  matches    paires (user_a < user_b, unique), closed=1 si fermé par
+             signalement
+  reports    signalements : reporter, reported, match, reason, status
+             (pending|banned|dismissed)
+  push_subs  abonnements Web Push par appareil (endpoint = clé primaire)
+  activity   journal d'événements pour le fil admin (type + texte)
+
+MIGRATIONS : la liste MIGRATIONS dans db.py contient des ALTER TABLE
+exécutés à chaque démarrage dans un try/except (l'échec « duplicate
+column » est normal sur une base à jour). POUR AJOUTER UNE COLONNE :
+ajoute-la dans le CREATE TABLE (pour les nouvelles installations) ET
+dans MIGRATIONS (pour les bases existantes). N'en retire jamais une.
+
+⚠ PIÈGE IMPORTANT — get_db() : le context manager committe à la sortie
+SEULEMENT si aucune exception n'est levée. Si tu écris en base PUIS
+lèves une HTTPException volontairement (ex. les strikes de spam), tu
+DOIS appeler db.commit() toi-même avant le raise, sinon l'écriture est
+perdue. Cherche « db.commit() » dans main.py pour voir les deux cas.
+
+
+──────────────────────────────────────────────────────────────────────
+6. BACKEND — LES ROUTES API
+──────────────────────────────────────────────────────────────────────
+
+Trois niveaux d'accès (backend/auth.py) :
+  CurrentUser      connecté (jeton valide)
+  CurrentApproved  connecté + validé par un admin + non banni
+  CurrentAdmin     connecté + is_admin
+
+AUTH & CONFIG
+  POST /api/register        {email, password, name, invite_code?}
+                            → {token, user_id}. Règles : email d'un
+                            domaine autorisé OU email dans
+                            SJDA_ADMIN_EMAILS OU bon SJDA_MOD_CODE.
+                            Le bon code rend admin + validé d'office.
+                            Un mauvais code est IGNORÉ si le domaine
+                            est bon (inscription normale).
+  POST /api/login           {email, password} → {token, user_id}.
+                            Refuse les bannis. Promeut is_admin si
+                            l'email est dans SJDA_ADMIN_EMAILS (jamais
+                            de rétrogradation ici).
+  GET  /api/config          {app_name, email_domains} — public, sert
+                            au hint du formulaire d'inscription.
+
+KYI (vérification d'identité — voir §7 le parcours complet)
+  POST /api/kyi             multipart : full_name, birthdate, classe,
+                            card (image ≤ 5 Mo). Notifie les admins.
+  GET  /api/admin/kyi-card/{user_id}   la photo de la carte — ADMIN
+                            SEULEMENT. Les cartes sont dans data/kyi/,
+                            un dossier volontairement NON monté en
+                            statique. Ne les déplace jamais dans
+                            uploads/ : ce sont des pièces d'identité.
+
+PROFIL
+  GET  /api/me              tout le profil + my_photos [{id,url}] +
+                            is_admin, approved, kyi_submitted,
+                            invisible, daily_likes
+  PUT  /api/profile         bio, classe, interests[], intent, gender,
+                            seeking, instagram, snapchat, whatsapp,
+                            age, invisible. BLOQUÉ (403) tant que le
+                            KYI n'est pas soumis (fonction require_kyi).
+  POST /api/profile/photo   multipart, ajoute une photo (max 6)
+  DELETE /api/profile/photos/{photo_id}
+  POST /api/account/delete  {password} — suppression définitive en
+                            libre-service : vérifie le mot de passe,
+                            efface les fichiers (photos + carte KYI)
+                            et la ligne users (tout cascade).
+
+DÉCOUVERTE & SWIPE (CurrentApproved)
+  GET  /api/discover        ?age_min=&age_max=&classe=
+                            Candidats compatibles : ni swipés, ni
+                            bannis, ni en attente, ni invisibles.
+                            Compatibilité d'intention : amis↔amis,
+                            couple↔couple, les_deux↔tout ; les
+                            préférences de genre (seeking) ne
+                            s'appliquent qu'en contexte « couple ».
+                            Les filtres d'âge n'excluent PAS les
+                            profils sans âge renseigné (choix assumé).
+                            Renvoie active_recent (last_seen < 3 j).
+  GET  /api/likes-me        {count} — combien de personnes t'ont liké
+                            que tu n'as pas encore swipées. ANONYME :
+                            ne renvoie jamais les noms. C'est voulu,
+                            ne l'enrichis pas sans réfléchir.
+  POST /api/swipe           {target_id, liked}. Enchaîne : blocage si
+                            invisible → quota de likes (voir
+                            enforce_like_quota) → enregistrement →
+                            détection de match réciproque → création
+                            du match + activité + WebSocket + push.
+  POST /api/rewind          annule le DERNIER swipe (et le match qu'il
+                            aurait créé), renvoie le profil pour
+                            remettre la carte dans la pile. Rend
+                            aussi le like au quota du jour.
+
+MATCHS & SIGNALEMENT
+  GET  /api/matches         liste avec les RÉSEAUX SOCIAUX débloqués
+                            (instagram/snapchat/whatsapp). C'est le
+                            cœur du produit : PAS de messagerie
+                            interne, un match révèle les réseaux.
+                            Les réseaux ne sont JAMAIS présents dans
+                            /api/discover — vérifie-le si tu touches
+                            à profile_dict (paramètre socials).
+  POST /api/report          {match_id, reason} — ferme le match,
+                            insère des passes mutuels (les deux ne se
+                            recroiseront plus), alerte les admins.
+                            Il n'y a VOLONTAIREMENT pas de signalement
+                            depuis la carte de découverte.
+
+PUSH
+  GET  /api/push/key        clé publique VAPID pour pushManager.subscribe
+  POST /api/push/subscribe  corps = l'objet PushSubscription du
+                            navigateur, stocké tel quel
+  POST /api/push/unsubscribe
+
+ADMIN (CurrentAdmin)
+  GET  /api/admin/overview  stats + 40 dernières activités
+  GET  /api/admin/pending   demandes en attente AVEC dossier KYI
+  POST /api/admin/users/{id}/approve  {approve: bool} — refuser
+                            SUPPRIME le compte et sa carte KYI
+  GET  /api/admin/reports   signalements (pending en premier)
+  POST /api/admin/reports/{id}        {action: "ban"|"dismiss"}
+  GET  /api/admin/users     élèves validés
+  POST /api/admin/users/{id}/ban      {banned: bool} — bannir coupe
+                            les sessions immédiatement
+  POST /api/admin/users/{id}/mod      {is_admin: bool}
+
+WEBSOCKET  /ws?token=<jeton>
+  Sens serveur→client uniquement (le client n'envoie que des
+  keep-alive). Événements : {type:"match", match_id} pour la personne
+  matchée, {type:"activity", event} pour les admins (fil en direct).
+  ⚠ PIÈGE : les routes FastAPI synchrones tournent dans un threadpool
+  SANS boucle asyncio. Pour envoyer sur le WebSocket depuis une route,
+  on passe par asyncio.run_coroutine_threadsafe sur la boucle capturée
+  au démarrage (_main_loop dans main.py). Si tu ajoutes un événement
+  temps réel, utilise notify_user() / notify_admins(), n'appelle
+  jamais ws.send_json directement depuis une route sync.
+
+LOGIQUE ANTI-SPAM (enforce_like_quota dans main.py)
+  1. Compte les likes du jour (created_at >= start of day, heure UTC).
+  2. Sous le quota : rien.
+  3. Au-delà : +1 spam_strike (COMMIT MANUEL, voir §5) puis erreur 429.
+  4. strikes >= SJDA_SPAM_STRIKES_BAN : suspension automatique
+     (ban_user), activité « 🤖 suspendu pour spam », push aux admins.
+  Un admin peut rétablir le compte ; les strikes restent (cumulatifs).
+
+NOTIFICATIONS PUSH ENVOYÉES
+  • nouveau match → à la personne matchée
+  • dossier KYI soumis → aux admins
+  • nouveau signalement → aux admins
+  • inscription acceptée → à l'élève
+  • suspension auto pour spam → aux admins
+  L'envoi part dans un thread (push.py), n'échoue jamais bruyamment,
+  et nettoie les abonnements expirés (HTTP 404/410).
+
+
+──────────────────────────────────────────────────────────────────────
+7. LE PARCOURS D'UN ÉLÈVE (à connaître par cœur)
+──────────────────────────────────────────────────────────────────────
+
+  1. Inscription (email étudiant obligatoire, code modo optionnel)
+  2. Écran KYI OBLIGATOIRE : nom officiel, date de naissance, classe,
+     photo de la carte d'étudiant. Le profil est verrouillé côté
+     serveur tant que ce n'est pas soumis (require_kyi).
+  3. Écran d'attente. L'élève PEUT préparer son profil pendant ce
+     temps. La page se met à jour seule (polling /api/me toutes les
+     5 s) quand un admin accepte.
+  4. Admin : notification push + demande dans le tableau de bord avec
+     le dossier complet et la carte consultable. Accepter / Refuser
+     (refuser = compte supprimé).
+  5. Découverte : swipe ❤/✕, ↺ pour annuler, quota de likes, bannière
+     « 👀 X personnes t'ont liké », badge « actif récemment », filtres
+     (âge, classe), mode invisible.
+  6. Match mutuel → écran « C'est un Match ! » → les réseaux sociaux
+     de l'autre sont débloqués (liens directs Instagram / Snapchat /
+     WhatsApp). La conversation se passe là-bas, pas dans l'app.
+  7. Depuis la fiche match : ⚠️ Signaler et bloquer (ferme le match,
+     alerte les modos).
+
+Côté admin (onglet 🛡 Modération, visible seulement pour is_admin) :
+stats, demandes d'inscription + KYI, signalements, fil d'activité en
+direct, liste des élèves (bannir / rétablir / promouvoir modo).
+
+
+──────────────────────────────────────────────────────────────────────
+8. FRONTEND — COMMENT C'EST FICHU
+──────────────────────────────────────────────────────────────────────
+
+app.js est une SPA artisanale :
+
+• NAVIGATION : chaque vue est une <section id="view-X"> dans
+  index.html. show("X") affiche la bonne et cache les autres. La liste
+  des vues est dans la constante VIEWS. La barre du bas (navbar) est
+  cachée sur auth et kyi.
+
+• ÉTAT : l'objet global `state` (token, userId, me, deck,
+  currentDetail, ws, timers). Le jeton vit dans localStorage
+  (sjda_token). api() ajoute le Bearer automatiquement et déconnecte
+  sur 401.
+
+• SWIPE : renderDeck() affiche au plus 3 cartes empilées (la première
+  de state.deck au-dessus). attachDrag() gère le glissement au
+  pointeur : translation + rotation + opacité des tampons LIKE/NOPE.
+  Relâcher au-delà de ±100 px déclenche swipeTop(liked). Un TAP
+  (mouvement < 8 px) change de photo (moitié droite = suivante,
+  moitié gauche = précédente) — carrousel façon Tinder avec les
+  barres de progression (.photo-dots). La pile se recharge en
+  arrière-plan quand il reste ≤ 2 cartes.
+
+• Si /api/swipe échoue (quota, invisible), la carte est REMISE dans
+  la pile (state.deck.unshift) — ne casse pas ce mécanisme.
+
+• PWA : sw.js met la coquille en cache (network-first, fallback
+  cache). ⚠ RÈGLE D'OR : à CHAQUE modification de style.css, app.js
+  ou index.html déployée, INCRÉMENTE la constante CACHE dans sw.js
+  (sjda-v4 → sjda-v5). Sinon les utilisateurs garderont l'ancienne
+  version en cache.
+
+• PUSH côté client : setupPush() → si déjà abonné, ré-enregistre ;
+  sinon montre la cloche 🔔 (si permission pas refusée). Le clic
+  demande la permission puis s'abonne avec la clé de /api/push/key.
+  Les handlers "push" et "notificationclick" sont dans sw.js.
+
+• ADMIN : loadAdmin() charge overview + pending + reports + users en
+  parallèle. Le fil se met à jour en direct via les événements
+  WebSocket type "activity" (et re-fetch ciblé selon event.type).
+  La carte d'étudiant est une image PROTÉGÉE : on ne peut pas mettre
+  l'URL dans un <img> (pas de header Authorization possible), donc
+  showKyiCard() la télécharge en fetch avec le Bearer puis l'affiche
+  via URL.createObjectURL. Garde ce pattern pour toute ressource
+  protégée.
+
+
+──────────────────────────────────────────────────────────────────────
+9. PERSONNALISATION ESTHÉTIQUE (le plus demandé)
+──────────────────────────────────────────────────────────────────────
+
+CHANGER LES COULEURS — un seul endroit : le bloc :root en tête de
+frontend/style.css. Charte actuelle (Institut Saint Jean, prise sur
+universitesaintjean.org) :
+
+  --grad     dégradé signature (auth, boutons, écran match, marque)
+             actuellement linear-gradient(45deg, #107EC2, #74226B)
+  --primary  #107EC2 (bleu IUSJ)   --accent  #FDD300 (jaune IUSJ)
+  --like     #2D7A3F (vert)        --pass    #CC151A (rouge)
+  --rewind   #FDD300               --bg / --card / --text / --muted /
+                                   --border : fonds et textes
+
+  Tout le reste du CSS référence ces variables. Change-les, tout suit.
+  Pense aussi à : theme_color dans frontend/manifest.json ET la
+  <meta name="theme-color"> dans index.html (couleur de la barre
+  système du téléphone).
+
+CHANGER LE NOM DE L'APP — 4 endroits :
+  1. SJDA_APP_NAME (env) — nom côté serveur (notifications…)
+  2. frontend/manifest.json : "name" et "short_name" (nom sous
+     l'icône installée)
+  3. index.html : le <title>, les éléments .logo et .brand (le
+     "🔥 SJDA" affiché), et le tagline
+  4. sw.js : le titre par défaut des notifications ("SJDA")
+  (grep -ri "sjda" frontend/ pour n'en rater aucun)
+
+CHANGER LE LOGO / LES ICÔNES :
+  Remplace frontend/icons/icon-192.png et icon-512.png (PNG carrés).
+  Les icônes actuelles (cœur jaune sur dégradé bleu→violet) ont été
+  générées avec Pillow — script prêt à adapter :
+
+    from PIL import Image, ImageDraw
+    for size in (192, 512):
+        img = Image.new('RGB', (size, size))
+        d = ImageDraw.Draw(img)
+        c1, c2 = (16, 126, 194), (116, 34, 107)   # dégradé
+        for y in range(size):
+            t = y / size
+            d.line([(0, y), (size, y)],
+                   fill=tuple(int(a+(b-a)*t) for a, b in zip(c1, c2)))
+        # ... dessine ton logo ici ...
+        img.save(f'frontend/icons/icon-{size}.png')
+
+  Après changement d'icônes : bump du CACHE dans sw.js, et les
+  utilisateurs devront parfois réinstaller la PWA pour voir la
+  nouvelle icône (comportement OS, pas un bug).
+
+CHANGER LES TEXTES : tout est en dur dans index.html (libellés,
+écrans d'attente/KYI, placeholders) et app.js (alertes, bannières,
+libellés d'intention INTENT_LABEL). Pas de système i18n — inutile
+pour une app mono-langue.
+
+CHANGER LES RÈGLES DU JEU :
+  • quota de likes / seuil de spam : variables d'env (§4)
+  • nombre max de photos : MAX_PHOTOS dans main.py (+ le texte dans
+    index.html et la condition photos.length < 6 dans app.js)
+  • fenêtre « actif récemment » : '-3 days' dans la requête discover
+  • taille de pile : LIMIT 60 / candidates[:15] dans discover
+  • âge autorisé : bornes 15-30 dans update_profile + input du HTML
+  • domaines email : SJDA_EMAIL_DOMAINS (env), rien à coder
+
+
+──────────────────────────────────────────────────────────────────────
+10. MISE EN LIGNE
+──────────────────────────────────────────────────────────────────────
+
+PRÉREQUIS ABSOLU : HTTPS. Sans HTTPS, pas d'installation PWA, pas de
+service worker, pas de notifications push, pas de wss://. Tous les
+hébergeurs ci-dessous le fournissent automatiquement.
+
+OPTION A — Render / Railway (le plus simple) :
+  1. Connecte le repo GitHub → « Web Service ». Le Dockerfile est
+     détecté et utilisé tel quel (uvicorn écoute sur $PORT).
+  2. Variables d'environnement : au minimum SJDA_ADMIN_EMAILS ;
+     recommandé : SJDA_MOD_CODE (long et imprévisible).
+  3. ⚠ LE PIÈGE CLASSIQUE : ajoute un DISQUE PERSISTANT monté sur
+     /app/data (Render : "Disk" ; Railway : "Volume" ; Fly :
+     "Volume"). Sans lui, CHAQUE redéploiement efface la base, les
+     photos, les cartes KYI et les clés push. Si le point de montage
+     est ailleurs, pointe SJDA_DATA_DIR dessus.
+  4. Ouvre l'URL sur un téléphone → « Ajouter à l'écran d'accueil ».
+
+OPTION B — VPS (plus de contrôle) :
+  docker build -t sjda . && docker run -d -p 80:8000 \
+    -v /srv/sjda-data:/app/data \
+    -e SJDA_ADMIN_EMAILS=... -e SJDA_MOD_CODE=... sjda
+  + un reverse proxy TLS devant (Caddy est le plus simple : 2 lignes
+  de Caddyfile et le HTTPS est automatique). Le WebSocket passe tout
+  seul avec Caddy ; avec nginx, pense aux en-têtes Upgrade/Connection.
+
+SAUVEGARDES : cron qui copie data/ (la base se copie à chaud sans
+problème à cette échelle ; pour être puriste :
+sqlite3 data/sjda.db ".backup backup.db").
+
+MISES À JOUR : git pull → redéploiement. La base migre toute seule
+(MIGRATIONS). Bump le cache du service worker si le frontend a changé.
+
+
+──────────────────────────────────────────────────────────────────────
+11. SÉCURITÉ & VIE PRIVÉE — LES INVARIANTS À NE PAS CASSER
+──────────────────────────────────────────────────────────────────────
+
+Quoi que tu modifies, préserve ces garanties. Elles sont le contrat
+moral de l'app vis-à-vis des élèves :
+
+  1. Les réseaux sociaux d'un profil ne sortent JAMAIS de l'API avant
+     un match mutuel (paramètre socials de profile_dict).
+  2. Les cartes d'étudiant (data/kyi/) ne sont JAMAIS servies en
+     statique — uniquement via l'endpoint admin authentifié.
+  3. Le compteur « qui m'a liké » reste ANONYME.
+  4. Refus d'inscription et suppression de compte EFFACENT les
+     fichiers (photos, carte KYI), pas seulement les lignes en base.
+  5. Les admins ne peuvent pas lire de conversations… parce qu'il n'y
+     en a pas. Si un jour tu ajoutes une messagerie, réfléchis à deux
+     fois à qui peut lire quoi.
+  6. Mots de passe : PBKDF2-SHA256 200k itérations, comparaison en
+     temps constant (hmac.compare_digest). Ne « simplifie » pas ça.
+  7. Un banni est coupé immédiatement (sessions supprimées) et
+     invisible partout.
+  8. Échappement HTML côté client : TOUT contenu utilisateur passe
+     par escapeHtml() avant innerHTML (bio, noms, motifs…). Si tu
+     affiches un nouveau champ utilisateur, échappe-le.
+
+Limites connues (assumées, à toi de voir si tu veux les durcir) :
+  • Pas de vérification que l'email appartient vraiment à la personne
+    (pas de lien de confirmation — nécessiterait un compte SMTP). La
+    validation manuelle + le KYI compensent.
+  • Pas de rate-limiting global sur l'API (seulement le quota de
+    likes). Derrière Cloudflare ou un proxy, tu peux l'ajouter là.
+  • Les URLs des photos de profil sont publiques si on les connaît
+    (noms de fichiers aléatoires de 16 hex — non devinables, mais
+    partageables).
+
+
+──────────────────────────────────────────────────────────────────────
+12. RECETTE DE TEST MANUEL (avant chaque mise en prod)
+──────────────────────────────────────────────────────────────────────
+
+En local avec des quotas réduits pour aller vite :
+  SJDA_ADMIN_EMAILS=admin@x.com SJDA_DAILY_LIKES=2 \
+  SJDA_SPAM_STRIKES_BAN=3 uvicorn backend.main:app --port 8000
+
+  □ Inscription email non autorisé → refusée avec la liste des domaines
+  □ Inscription email étudiant → écran KYI, profil bloqué (PUT → 403)
+  □ Soumission KYI → écran d'attente, profil débloqué
+  □ Admin : demande visible avec dossier + carte consultable
+  □ Accepter → l'écran de l'élève se débloque seul (≤ 5 s)
+  □ Refuser → compte supprimé, carte effacée de data/kyi/
+  □ Swipe mutuel → « C'est un Match ! » → réseaux visibles des 2 côtés
+  □ 3e like du jour → 429 ; insister 3 fois → suspension auto + fil admin
+  □ Mode invisible → absent du deck des autres, swipe bloqué
+  □ Signalement depuis la fiche match → match fermé, alerte admin
+  □ Suppression de compte → login impossible, fichiers effacés
+  □ Sur téléphone (HTTPS) : installation PWA + réception d'un push
+
+Il y a aussi des tests Playwright d'exemple dans l'historique du
+projet ; l'app se teste très bien en headless (Chromium).
+
+
+──────────────────────────────────────────────────────────────────────
+13. IDÉES D'ÉVOLUTION (par ordre de valeur)
+──────────────────────────────────────────────────────────────────────
+
+  1. RECYCLAGE DES « PASSÉS » : dans une école, le deck s'épuise vite.
+     Fais expirer les swipes liked=0 après ~3 semaines (un DELETE
+     périodique ou un filtre sur created_at dans discover). ATTENTION :
+     ne recycle jamais les paires issues d'un signalement (elles ont
+     un swipe liked=0 dans les DEUX sens — c'est le marqueur de
+     blocage ; exclue les paires mutuelles du recyclage).
+  2. Vérification email par lien (nécessite SMTP).
+  3. Filtre par centres d'intérêt.
+  4. Statistiques d'usage pour l'admin (matchs/jour, rétention).
+  5. PostgreSQL + stockage objet si > ~1000 utilisateurs actifs.
+
+Bon code, et prends soin de cette app — elle va créer des amitiés
+(et peut-être plus) bien réelles. 💙💛
+
+                                        — L'équipe de développement SJDA

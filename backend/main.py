@@ -125,22 +125,14 @@ def photos_map(db, user_ids: list[int]) -> dict[int, list[str]]:
     return result
 
 
-def school_check(email: str, invite_code: str) -> None:
-    """L'inscription passe si l'email est du domaine de l'école
-    OU si le code d'invitation est correct."""
-    domain_ok = bool(config.EMAIL_DOMAIN) and email.lower().endswith(
-        "@" + config.EMAIL_DOMAIN
+def mod_code_ok(invite_code: str) -> bool:
+    return bool(config.MOD_CODE) and secrets.compare_digest(
+        invite_code.strip(), config.MOD_CODE
     )
-    code_ok = bool(config.INVITE_CODE) and secrets.compare_digest(
-        invite_code.strip(), config.INVITE_CODE
-    )
-    if not (domain_ok or code_ok):
-        detail = "Inscription réservée aux élèves de l'école"
-        if config.INVITE_CODE:
-            detail += " : code d'invitation invalide"
-        if config.EMAIL_DOMAIN:
-            detail += f" (ou utilise ton email @{config.EMAIL_DOMAIN})"
-        raise HTTPException(status_code=403, detail=detail)
+
+
+def student_email_ok(email: str) -> bool:
+    return any(email.endswith("@" + d) for d in config.EMAIL_DOMAINS)
 
 
 def get_match_or_404(db, match_id: int, user_id: int):
@@ -171,10 +163,19 @@ def log_activity(db, type_: str, text: str) -> dict:
 @app.post("/api/register")
 def register(body: RegisterIn):
     email = body.email.lower()
-    school_check(email, body.invite_code)
+    # le bon code (optionnel) fait de toi un modérateur ; sinon il faut
+    # un email étudiant de l'école
+    code_ok = mod_code_ok(body.invite_code)
+    admin_listed = email in config.ADMIN_EMAILS
+    if not (student_email_ok(email) or code_ok or admin_listed):
+        domains = ", ".join("@" + d for d in sorted(config.EMAIL_DOMAINS))
+        raise HTTPException(
+            status_code=403,
+            detail=f"Inscris-toi avec ton email étudiant ({domains})",
+        )
     salt = auth.new_salt()
     pw_hash = auth.hash_password(body.password, salt)
-    is_admin = int(email in config.ADMIN_EMAILS)
+    is_admin = int(admin_listed or code_ok)
     name = body.name.strip()
     with get_db() as db:
         try:
@@ -218,11 +219,12 @@ def login(body: LoginIn):
             raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
         if user["banned"]:
             raise HTTPException(status_code=403, detail="Ce compte a été suspendu")
-        # synchronise le statut admin avec la configuration
-        if bool(user["is_admin"]) != (email in config.ADMIN_EMAILS):
+        # promotion automatique si l'email est ajouté à SJDA_ADMIN_EMAILS
+        # (jamais de rétrogradation ici : les modos par code le restent)
+        if not user["is_admin"] and email in config.ADMIN_EMAILS:
             db.execute(
-                "UPDATE users SET is_admin = ? WHERE id = ?",
-                (int(email in config.ADMIN_EMAILS), user["id"]),
+                "UPDATE users SET is_admin = 1, approved = 1 WHERE id = ?",
+                (user["id"],),
             )
     return {"token": auth.create_session(user["id"]), "user_id": user["id"]}
 
@@ -231,8 +233,7 @@ def login(body: LoginIn):
 def app_config():
     return {
         "app_name": config.APP_NAME,
-        "email_domain": config.EMAIL_DOMAIN,
-        "invite_required": bool(config.INVITE_CODE) or bool(config.EMAIL_DOMAIN),
+        "email_domains": sorted(config.EMAIL_DOMAINS),
     }
 
 
@@ -684,6 +685,30 @@ def admin_users(admin_id: int = auth.CurrentAdmin):
             "WHERE u.approved = 1 ORDER BY u.id DESC LIMIT 500"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+class ModIn(BaseModel):
+    is_admin: bool
+
+
+@app.post("/api/admin/users/{target_id}/mod")
+def admin_mod(target_id: int, body: ModIn, admin_id: int = auth.CurrentAdmin):
+    """Promeut ou rétrograde un modérateur."""
+    if target_id == admin_id:
+        raise HTTPException(status_code=422, detail="Impossible de se modifier soi-même")
+    with get_db() as db:
+        user = db.execute(
+            "SELECT * FROM users WHERE id = ?", (target_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+        db.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?",
+            (int(body.is_admin), target_id),
+        )
+        verb = "promu·e modérateur·rice" if body.is_admin else "retiré·e des modérateurs"
+        log_activity(db, "mod", f"🛡️ {user['name']} a été {verb}")
+    return {"ok": True}
 
 
 @app.post("/api/admin/users/{target_id}/ban")

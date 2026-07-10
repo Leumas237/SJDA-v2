@@ -4,8 +4,8 @@
   "description": "Rencontre les élèves de ton école : amitié ou plus, si affinités !",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f0f2f4",
-  "theme_color": "#fd267a",
+  "background_color": "#f0f4f7",
+  "theme_color": "#107EC2",
   "lang": "fr",
   "icons": [
     { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },

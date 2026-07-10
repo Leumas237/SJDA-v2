@@ -642,14 +642,27 @@ function renderAdminUsers(users) {
   users.forEach((u) => {
     const div = document.createElement("div");
     div.className = "user-row" + (u.banned ? " banned" : "");
+    const isSelf = u.id === state.userId;
     div.innerHTML = `
       <div class="u-info">
         <b>${escapeHtml(u.name)}</b> ${u.is_admin ? "🛡️" : ""} ${u.banned ? "🚫" : ""}
         <span class="muted">${escapeHtml(u.email)}${u.classe ? " · " + escapeHtml(u.classe) : ""}</span>
       </div>
-      ${u.id !== state.userId ? `<button class="btn-mini ${u.banned ? "" : "danger"}">${u.banned ? "Rétablir" : "Bannir"}</button>` : ""}`;
-    const btn = div.querySelector("button");
-    if (btn) btn.onclick = async () => {
+      ${isSelf ? "" : `<div class="u-actions">
+        <button class="btn-mini" data-act="mod">${u.is_admin ? "Retirer modo" : "Modo"}</button>
+        <button class="btn-mini ${u.banned ? "" : "danger"}" data-act="ban">${u.banned ? "Rétablir" : "Bannir"}</button>
+      </div>`}`;
+    const modBtn = div.querySelector('[data-act="mod"]');
+    if (modBtn) modBtn.onclick = async () => {
+      const promote = !u.is_admin;
+      if (!confirm(promote
+        ? `Faire de ${u.name} un·e modérateur·rice ? Il/elle verra tout le tableau de bord.`
+        : `Retirer les droits de modération de ${u.name} ?`)) return;
+      await api(`/admin/users/${u.id}/mod`, { method: "POST", json: { is_admin: promote } });
+      loadAdmin();
+    };
+    const banBtn = div.querySelector('[data-act="ban"]');
+    if (banBtn) banBtn.onclick = async () => {
       if (!u.banned && !confirm(`Bannir ${u.name} ? Son compte sera immédiatement suspendu.`)) return;
       await api(`/admin/users/${u.id}/ban`, { method: "POST", json: { banned: !u.banned } });
       loadAdmin();
@@ -745,6 +758,15 @@ function escapeHtml(s) {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+// rappel des emails étudiants acceptés sous le champ d'inscription
+api("/config").then((c) => {
+  const domains = c.email_domains || [];
+  if (domains.length) {
+    $("reg-hint").textContent =
+      "Utilise ton email étudiant : " + domains.map((d) => "@" + d).join(", ");
+  }
+}).catch(() => {});
 
 (async function init() {
   if (state.token) {

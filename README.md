@@ -21,8 +21,14 @@ sortir de leur bulle : se faire des amis, ou peut-être plus, si affinités !
   que des profils compatibles
 - ✋ **Inscriptions validées à la main** : chaque demande d'inscription doit être
   acceptée par un admin avant que l'élève accède à l'app
-- 🏫 **Réservé à l'école** : inscription protégée par un code d'invitation
-  et/ou le domaine email de l'école
+- 🏫 **Réservé à l'école** : inscription avec un email étudiant de l'Institut
+  Saint Jean (@institutsaintjean.org, @cpgesaintjean.org,
+  @universitesaintjean.org, @prepavogt.org, @saintjeaningenieur.org,
+  @saintjeanmanagement.org, @prepasaintjean.org — configurable). Le champ
+  « Code d'invitation (optionnel) » est en réalité le **code modérateur** :
+  la bonne valeur fait de l'inscrit un modo validé d'office
+- 🎨 **Charte graphique Institut Saint Jean** : bleu #107EC2, jaune #FDD300,
+  violet #74226B (couleurs du site officiel universitesaintjean.org)
 - 📱 **PWA** : installable sur l'écran d'accueil, fonctionne sur tous les téléphones
 - 🛡️ **Modération en temps réel** : tableau de bord admin avec statistiques,
   fil d'activité en direct, demandes d'inscription, signalements et bannissement
@@ -47,8 +53,8 @@ Démarrage sans Docker : `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
 
 **Render / Railway (le plus simple)** :
 1. Connecte ce repo GitHub, choisis « Web Service » (Render détecte le Dockerfile)
-2. Configure les variables d'environnement : `SJDA_ADMIN_EMAILS` (ton email),
-   `SJDA_INVITE_CODE` (change le code par défaut !)
+2. Configure les variables d'environnement : `SJDA_ADMIN_EMAILS` (ton email)
+   et éventuellement `SJDA_MOD_CODE` (code modérateur secret)
 3. ⚠️ **Important — persistance** : la base SQLite et les photos vivent dans
    `./data`. Sur les offres gratuites, le disque est effacé à chaque
    redéploiement. Ajoute un **disque persistant** (Render : "Disk", Railway :
@@ -61,14 +67,16 @@ Démarrage sans Docker : `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `SJDA_INVITE_CODE` | `SJDA2026` | Code d'invitation à partager aux élèves |
-| `SJDA_EMAIL_DOMAIN` | *(vide)* | Ex. `monecole.fr` : les emails de ce domaine s'inscrivent sans code |
-| `SJDA_ADMIN_EMAILS` | *(vide)* | Emails des modérateurs, séparés par des virgules |
+| `SJDA_EMAIL_DOMAINS` | les 7 domaines Saint Jean | Domaines email autorisés à l'inscription, séparés par des virgules |
+| `SJDA_MOD_CODE` | *(vide)* | Code modérateur secret : fourni à l'inscription, il rend le compte modo (et permet de s'inscrire sans email étudiant). Vide = désactivé |
+| `SJDA_ADMIN_EMAILS` | *(vide)* | Emails toujours admins (promus à la connexion si besoin) |
 | `SJDA_APP_NAME` | `SJDA` | Nom affiché de l'app |
-| `SJDA_DATA_DIR` | `./data` | Dossier de la base SQLite et des photos |
+| `SJDA_DATA_DIR` | `./data` | Dossier de la base SQLite, des photos et des clés VAPID |
 
-À l'inscription, **l'une ou l'autre** condition suffit : bon code d'invitation,
-ou email du domaine de l'école.
+L'inscription exige un email étudiant d'un des domaines — sauf pour les
+emails de `SJDA_ADMIN_EMAILS` et pour qui fournit le bon `SJDA_MOD_CODE`.
+Les admins peuvent aussi promouvoir/rétrograder un modo depuis la liste des
+élèves du tableau de bord.
 
 ## Architecture
 

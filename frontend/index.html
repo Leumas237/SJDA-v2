@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#fd267a">
+  <meta name="theme-color" content="#107EC2">
   <title>SJDA — Rencontres à l'école</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/static/icons/icon-192.png">
@@ -31,9 +31,10 @@
 
         <form id="form-register" class="auth-form hidden">
           <input type="text" id="reg-name" placeholder="Prénom" required minlength="2" autocomplete="given-name">
-          <input type="email" id="reg-email" placeholder="Email" required autocomplete="email">
+          <input type="email" id="reg-email" placeholder="Email étudiant" required autocomplete="email">
+          <p id="reg-hint" class="muted reg-hint"></p>
           <input type="password" id="reg-password" placeholder="Mot de passe (8 caractères min.)" required minlength="8" autocomplete="new-password">
-          <input type="text" id="reg-invite" placeholder="Code d'invitation de l'école">
+          <input type="text" id="reg-invite" placeholder="Code d'invitation (optionnel)">
           <button type="submit" class="btn-primary">Créer mon compte</button>
         </form>
 

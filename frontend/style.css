@@ -1,16 +1,18 @@
-/* SJDA — design façon Tinder, mobile-first */
+/* SJDA — design façon Tinder, charte Institut Saint Jean
+   (bleu #107EC2, jaune #FDD300, violet #74226B) */
 :root {
-  --grad: linear-gradient(45deg, #fd267a, #ff6036);
-  --primary: #fd267a;
-  --primary-2: #ff6036;
-  --bg: #f0f2f4;
+  --grad: linear-gradient(45deg, #107EC2, #74226B);
+  --primary: #107EC2;
+  --primary-2: #74226B;
+  --accent: #FDD300;
+  --bg: #f0f4f7;
   --card: #ffffff;
   --text: #21262e;
   --muted: #7c8591;
-  --border: #e4e8ec;
-  --like: #24dc89;
-  --pass: #ff4458;
-  --rewind: #f5b748;
+  --border: #e2e8ee;
+  --like: #2D7A3F;
+  --pass: #CC151A;
+  --rewind: #FDD300;
   --radius: 14px;
   --nav-h: 60px;
 }
@@ -85,7 +87,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
   padding: 14px; font-size: 1rem; font-weight: 700; color: #fff;
   background: var(--grad);
   border: none; border-radius: 999px; cursor: pointer;
-  box-shadow: 0 4px 14px rgba(253, 38, 122, 0.35);
+  box-shadow: 0 4px 14px rgba(16, 126, 194, 0.35);
 }
 .btn-primary:active { transform: scale(0.98); }
 .btn-ghost {
@@ -177,9 +179,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
   padding: 13px 18px; background: var(--card);
   border-bottom: 1px solid var(--border); cursor: pointer;
 }
-.match-item:active { background: #fef1f5; }
+.match-item:active { background: #eef6fc; }
 .avatar, .avatar-sm {
-  border-radius: 50%; object-fit: cover; background: #ffd9e6;
+  border-radius: 50%; object-fit: cover; background: #d7eaf7;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; color: var(--primary);
 }
@@ -207,7 +209,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
   padding: 13px 16px; border: 1px solid var(--border); border-radius: 12px;
   text-decoration: none; color: var(--text); background: var(--bg);
 }
-.social-link:active { background: #fef1f5; }
+.social-link:active { background: #eef6fc; }
 .danger-text { color: var(--pass); }
 .socials-box {
   border: 1px solid var(--border); border-radius: 12px; padding: 12px;
@@ -275,7 +277,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
 .match-avatars { display: flex; justify-content: center; }
 .match-avatars .avatar {
   width: 108px; height: 108px; border: 4px solid #fff; font-size: 2.4rem;
-  box-shadow: 0 6px 22px rgba(0,0,0,0.3); background: #ffd9e6;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.3); background: #d7eaf7;
 }
 .match-avatars .avatar + .avatar { margin-left: -22px; }
 .btn-light {
@@ -327,7 +329,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
   padding: 9px 12px; margin-bottom: 6px; font-size: 0.9rem;
 }
 .user-row.banned { opacity: 0.6; }
-.u-info { display: flex; flex-direction: column; }
+.u-info { display: flex; flex-direction: column; min-width: 0; }
+.u-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.reg-hint { font-size: 0.78rem; margin-top: -6px; line-height: 1.4; }
 .report-btn { margin-left: auto; }
 
 @media (min-width: 700px) {

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin      INTEGER NOT NULL DEFAULT 0,
     banned        INTEGER NOT NULL DEFAULT 0,
     approved      INTEGER NOT NULL DEFAULT 0,       -- validé par un admin
+    last_seen     TEXT NOT NULL DEFAULT '',
+    spam_strikes  INTEGER NOT NULL DEFAULT 0,       -- likes tentés au-delà du quota
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -29,7 +31,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     instagram TEXT NOT NULL DEFAULT '',            -- réseaux : visibles
     snapchat  TEXT NOT NULL DEFAULT '',            -- uniquement après match
     whatsapp  TEXT NOT NULL DEFAULT '',
-    age       INTEGER NOT NULL DEFAULT 0           -- 0 = non renseigné
+    age       INTEGER NOT NULL DEFAULT 0,          -- 0 = non renseigné
+    invisible INTEGER NOT NULL DEFAULT 0           -- mode AFK : caché, swipe bloqué
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -110,6 +113,9 @@ MIGRATIONS = [
     "ALTER TABLE profiles ADD COLUMN snapchat TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE profiles ADD COLUMN whatsapp TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE profiles ADD COLUMN age INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE profiles ADD COLUMN invisible INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN spam_strikes INTEGER NOT NULL DEFAULT 0",
 ]
 
 

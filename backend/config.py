@@ -37,6 +37,11 @@ ADMIN_EMAILS = {
     if e.strip()
 }
 
+# Économie des likes : quota quotidien, et suspension automatique pour spam
+# après trop de tentatives au-delà du quota (chaque tentative rejetée compte).
+DAILY_LIKES = int(os.environ.get("SJDA_DAILY_LIKES", "15"))
+SPAM_STRIKES_BAN = int(os.environ.get("SJDA_SPAM_STRIKES_BAN", "30"))
+
 MAX_PHOTO_BYTES = 5 * 1024 * 1024  # 5 Mo
 SESSION_DAYS = 30
 

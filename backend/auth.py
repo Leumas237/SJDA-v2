@@ -41,6 +41,12 @@ def user_id_from_token(token: str) -> int | None:
         row = db.execute(
             "SELECT user_id FROM sessions WHERE token = ?", (token,)
         ).fetchone()
+        if row:
+            # trace d'activité pour le badge « actif récemment »
+            db.execute(
+                "UPDATE users SET last_seen = datetime('now') WHERE id = ?",
+                (row["user_id"],),
+            )
     return row["user_id"] if row else None
 
 

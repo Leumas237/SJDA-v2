@@ -10,6 +10,16 @@ sortir de leur bulle : se faire des amis, ou peut-être plus, si affinités !
   carrousel sur la carte (tap gauche/droite pour changer de photo)
 - ⚙️ **Filtres de découverte** : par âge (min/max) et par classe
 - 🎉 **Match** quand deux personnes se likent mutuellement
+- 💛 **Économie des likes** : quota quotidien (15 par défaut, `SJDA_DAILY_LIKES`) ;
+  s'acharner au-delà du quota accumule des strikes et finit en **suspension
+  automatique pour spam** (`SJDA_SPAM_STRIKES_BAN`, 30 par défaut), avec
+  alerte aux modos
+- 👀 **« Qui m'a liké » anonyme** : un compteur, jamais les noms
+- 🕶️ **Mode invisible (AFK)** : tu disparais de la découverte et le swipe est
+  bloqué tant qu'il est actif ; tes matchs existants restent
+- 🟢 **Badge « actif récemment »** sur les cartes (activité < 3 jours)
+- 🗑️ **Suppression de compte en libre-service** : mot de passe exigé, tout est
+  effacé immédiatement (profil, photos, dossier KYI, matchs, abonnements push)
 - 🔔 **Notifications push** : nouveau match, demande d'inscription et
   signalement (admins), inscription acceptée — clés VAPID générées
   automatiquement au premier lancement, rien à configurer
@@ -76,6 +86,8 @@ Démarrage sans Docker : `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
 | `SJDA_EMAIL_DOMAINS` | les 7 domaines Saint Jean | Domaines email autorisés à l'inscription, séparés par des virgules |
 | `SJDA_MOD_CODE` | *(vide)* | Code modérateur secret : fourni à l'inscription, il rend le compte modo (et permet de s'inscrire sans email étudiant). Vide = désactivé |
 | `SJDA_ADMIN_EMAILS` | *(vide)* | Emails toujours admins (promus à la connexion si besoin) |
+| `SJDA_DAILY_LIKES` | `15` | Quota de likes par jour et par personne |
+| `SJDA_SPAM_STRIKES_BAN` | `30` | Tentatives au-delà du quota avant suspension automatique |
 | `SJDA_APP_NAME` | `SJDA` | Nom affiché de l'app |
 | `SJDA_DATA_DIR` | `./data` | Dossier de la base SQLite, des photos et des clés VAPID |
 
@@ -133,6 +145,7 @@ avant un match mutuel.
 
 ## Idées pour la suite
 
-- Suppression de compte et des données
+- Recyclage des « passés » après quelques semaines (sinon le deck s'épuise
+  vite dans une petite école)
 - Vérification email par lien de confirmation
 - Filtre par centres d'intérêt

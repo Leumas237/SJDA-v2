@@ -125,6 +125,20 @@ function logout() {
 
 $("btn-logout").onclick = logout;
 $("btn-waiting-logout").onclick = logout;
+
+$("btn-delete-account").onclick = async () => {
+  if (!confirm(
+    "Supprimer définitivement ton compte ?\n" +
+    "Profil, photos, dossier d'identité et matchs seront effacés. C'est irréversible."
+  )) return;
+  const password = prompt("Pour confirmer, entre ton mot de passe :");
+  if (!password) return;
+  try {
+    await api("/account/delete", { method: "POST", json: { password } });
+    alert("Compte supprimé. Prends soin de toi 👋");
+    logout();
+  } catch (err) { alert(err.message); }
+};
 $("btn-waiting-profile").onclick = () => { show("profile"); fillProfileForm(); };
 
 /* ---------------- KYI (vérification d'identité) ---------------- */
@@ -209,6 +223,7 @@ function fillProfileForm() {
   $("p-instagram").value = p.instagram || "";
   $("p-snapchat").value = p.snapchat || "";
   $("p-whatsapp").value = p.whatsapp || "";
+  $("p-invisible").checked = !!p.invisible;
   renderPhotosGrid();
 }
 
@@ -253,6 +268,7 @@ $("form-profile").addEventListener("submit", async (e) => {
       instagram: $("p-instagram").value,
       snapchat: $("p-snapchat").value,
       whatsapp: $("p-whatsapp").value,
+      invisible: $("p-invisible").checked,
     },
   });
   state.me = await api("/me");
@@ -319,7 +335,29 @@ $("btn-filters-reset").onclick = () => {
 };
 
 async function loadDeck() {
-  state.deck = await api("/discover" + filterQuery());
+  const invisible = state.me && state.me.invisible;
+  $("deck-invisible").classList.toggle("hidden", !invisible);
+  if (invisible) {
+    state.deck = [];
+    $("deck").innerHTML = "";
+    $("deck-empty").classList.add("hidden");
+    $("likes-banner").classList.add("hidden");
+    return;
+  }
+  const [deck, likes] = await Promise.all([
+    api("/discover" + filterQuery()),
+    api("/likes-me").catch(() => ({ count: 0 })),
+  ]);
+  state.deck = deck;
+  const banner = $("likes-banner");
+  if (likes.count > 0) {
+    banner.textContent = likes.count === 1
+      ? "👀 1 personne t'a liké — elle est peut-être dans ta pile !"
+      : `👀 ${likes.count} personnes t'ont liké — swipe pour les trouver !`;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
   renderDeck();
 }
 
@@ -342,6 +380,8 @@ function makeCard(p) {
   const interests = (p.interests || [])
     .map((t) => `<span class="badge">${escapeHtml(t)}</span>`).join("");
   const age = p.age ? `<span class="age">, ${p.age}</span>` : "";
+  const activeBadge = p.active_recent
+    ? '<span class="badge active">🟢 Actif·ve récemment</span>' : "";
   const dots = photos.length > 1
     ? `<div class="photo-dots">${photos.map((_, i) =>
         `<span class="${i === 0 ? "on" : ""}"></span>`).join("")}</div>`
@@ -354,7 +394,7 @@ function makeCard(p) {
       <h3>${escapeHtml(p.name)}${age}</h3>
       <div class="card-sub">${escapeHtml(p.classe || "")}</div>
       <div>${escapeHtml(p.bio || "")}</div>
-      <div class="badges"><span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
+      <div class="badges">${activeBadge}<span class="badge intent">${INTENT_LABEL[p.intent] || ""}</span>${interests}</div>
     </div>`;
   setCardPhoto(card, photos, 0);
   return card;
@@ -451,7 +491,12 @@ async function swipeTop(liked) {
       json: { target_id: targetId, liked },
     });
     if (res.matched) showMatchPopup(swiped, res.match_id);
-  } catch (err) { console.error(err); }
+  } catch (err) {
+    // quota de likes atteint ou mode invisible : on rend la carte
+    state.deck.unshift(swiped);
+    renderDeck();
+    alert(err.message);
+  }
 }
 
 $("btn-like").onclick = () => swipeTop(true);

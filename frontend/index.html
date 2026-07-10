@@ -51,10 +51,16 @@
           <button id="btn-filters" class="icon-btn" title="Filtres">⚙️</button>
         </div>
       </header>
+      <div id="likes-banner" class="likes-banner hidden"></div>
       <div id="deck" class="deck"></div>
       <div id="deck-empty" class="empty hidden">
         <p>😌 Plus personne à découvrir pour l'instant.</p>
         <p class="muted">Reviens plus tard, élargis tes filtres, ou invite tes camarades&nbsp;!</p>
+      </div>
+      <div id="deck-invisible" class="empty hidden">
+        <p>🕶️ Mode invisible activé.</p>
+        <p class="muted">Tu n'apparais plus dans la découverte et le swipe est en pause.<br>
+        Désactive-le dans ton profil quand tu veux revenir.</p>
       </div>
       <div class="swipe-actions">
         <button id="btn-rewind" class="round-btn sm rewind" title="Annuler le dernier swipe">↺</button>
@@ -175,9 +181,15 @@
             <option value="garcons">Les garçons</option>
           </select>
         </label>
+        <label class="toggle-line">
+          <input type="checkbox" id="p-invisible">
+          <span>🕶️ Mode invisible <span class="muted">— tu disparais de la découverte
+          et tu ne peux plus swiper (tes matchs restent)</span></span>
+        </label>
         <button type="submit" class="btn-primary">Enregistrer</button>
         <p id="profile-saved" class="success hidden">Profil enregistré ✔</p>
         <button type="button" id="btn-logout" class="btn-ghost">Se déconnecter</button>
+        <button type="button" id="btn-delete-account" class="btn-ghost danger-text">Supprimer mon compte</button>
       </form>
     </section>
 

@@ -58,6 +58,11 @@ class ProfileIn(BaseModel):
     snapchat: str = Field(default="", max_length=60)
     whatsapp: str = Field(default="", max_length=25)
     age: int = Field(default=0, ge=0, le=99)
+    invisible: bool = False
+
+
+class DeleteAccountIn(BaseModel):
+    password: str
 
 
 class SwipeIn(BaseModel):
@@ -265,6 +270,8 @@ def me(user_id: int = auth.CurrentUser):
         "is_admin": bool(row["is_admin"]),
         "approved": bool(row["approved"]),
         "kyi_submitted": bool(kyi_row),
+        "invisible": bool(row["invisible"]),
+        "daily_likes": config.DAILY_LIKES,
     }
 
 
@@ -347,7 +354,7 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
         db.execute(
             "UPDATE profiles SET bio = ?, classe = ?, interests = ?, intent = ?, "
             "gender = ?, seeking = ?, instagram = ?, snapchat = ?, whatsapp = ?, "
-            "age = ? WHERE user_id = ?",
+            "age = ?, invisible = ? WHERE user_id = ?",
             (
                 body.bio.strip(),
                 body.classe.strip(),
@@ -359,6 +366,7 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
                 snapchat,
                 whatsapp,
                 body.age,
+                int(body.invisible),
                 user_id,
             ),
         )
@@ -408,6 +416,41 @@ def delete_photo(photo_id: int, user_id: int = auth.CurrentUser):
     return {"ok": True}
 
 
+@app.post("/api/account/delete")
+def delete_account(body: DeleteAccountIn, user_id: int = auth.CurrentUser):
+    """Suppression définitive en libre-service : compte, profil, photos,
+    dossier KYI, matchs et abonnements push."""
+    with get_db() as db:
+        user = db.execute(
+            "SELECT * FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not auth.verify_password(
+            body.password, user["salt"], user["password_hash"]
+        ):
+            raise HTTPException(status_code=403, detail="Mot de passe incorrect")
+        photo_files = [
+            r["filename"]
+            for r in db.execute(
+                "SELECT filename FROM photos WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        ]
+        kyi_row = db.execute(
+            "SELECT card_photo FROM kyi WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        legacy = db.execute(
+            "SELECT photo FROM profiles WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        log_activity(db, "delete", f"🗑️ {user['name']} a supprimé son compte")
+        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    for f in photo_files:
+        (config.UPLOADS_DIR / f).unlink(missing_ok=True)
+    if legacy and legacy["photo"]:
+        (config.UPLOADS_DIR / legacy["photo"]).unlink(missing_ok=True)
+    if kyi_row and kyi_row["card_photo"]:
+        (config.KYI_DIR / kyi_row["card_photo"]).unlink(missing_ok=True)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- découverte
 
 def intents_compatible(a: str, b: str) -> bool:
@@ -435,8 +478,11 @@ def discover(
             "SELECT * FROM profiles WHERE user_id = ?", (user_id,)
         ).fetchone()
         rows = db.execute(
-            "SELECT p.*, u.name FROM profiles p JOIN users u ON u.id = p.user_id "
+            "SELECT p.*, u.name, "
+            "(u.last_seen >= datetime('now', '-3 days')) AS active_recent "
+            "FROM profiles p JOIN users u ON u.id = p.user_id "
             "WHERE p.user_id != ? AND u.banned = 0 AND u.approved = 1 "
+            "AND p.invisible = 0 "
             "AND p.user_id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?) "
             "ORDER BY RANDOM() LIMIT 60",
             (user_id, user_id),
@@ -462,7 +508,32 @@ def discover(
             candidates.append(row)
         candidates = candidates[:15]
         pmap = photos_map(db, [r["user_id"] for r in candidates])
-    return [profile_dict(r, photos=pmap.get(r["user_id"], [])) for r in candidates]
+    return [
+        {
+            **profile_dict(r, photos=pmap.get(r["user_id"], [])),
+            "active_recent": bool(r["active_recent"]),
+        }
+        for r in candidates
+    ]
+
+
+@app.get("/api/likes-me")
+def likes_me(user_id: int = auth.CurrentApproved):
+    """Compteur anonyme : combien de personnes t'ont liké et attendent
+    ton swipe. Jamais les noms."""
+    with get_db() as db:
+        count = db.execute(
+            """
+            SELECT COUNT(*) c FROM swipes s
+            JOIN users u ON u.id = s.swiper_id
+            JOIN profiles p ON p.user_id = s.swiper_id
+            WHERE s.target_id = ? AND s.liked = 1
+              AND u.banned = 0 AND u.approved = 1 AND p.invisible = 0
+              AND s.swiper_id NOT IN (SELECT target_id FROM swipes WHERE swiper_id = ?)
+            """,
+            (user_id, user_id),
+        ).fetchone()["c"]
+    return {"count": count}
 
 
 @app.post("/api/swipe")
@@ -470,6 +541,18 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
     if body.target_id == user_id:
         raise HTTPException(status_code=422, detail="Impossible de se swiper soi-même")
     with get_db() as db:
+        me_row = db.execute(
+            "SELECT p.invisible, u.name FROM profiles p "
+            "JOIN users u ON u.id = p.user_id WHERE p.user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if me_row["invisible"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Mode invisible activé : désactive-le dans ton profil pour swiper",
+            )
+        if body.liked:
+            enforce_like_quota(db, user_id, me_row["name"])
         target = db.execute(
             "SELECT id FROM users WHERE id = ?", (body.target_id,)
         ).fetchone()
@@ -512,6 +595,40 @@ def swipe(body: SwipeIn, user_id: int = auth.CurrentApproved):
             "Ses réseaux sont débloqués !",
         )
     return {"matched": matched, "match_id": match_id}
+
+
+def enforce_like_quota(db, user_id: int, name: str) -> None:
+    """Quota quotidien de likes. S'acharner au-delà du quota accumule des
+    strikes ; trop de strikes = suspension automatique pour spam."""
+    today_likes = db.execute(
+        "SELECT COUNT(*) c FROM swipes WHERE swiper_id = ? AND liked = 1 "
+        "AND created_at >= datetime('now', 'start of day')",
+        (user_id,),
+    ).fetchone()["c"]
+    if today_likes < config.DAILY_LIKES:
+        return
+    strikes = db.execute(
+        "UPDATE users SET spam_strikes = spam_strikes + 1 WHERE id = ? "
+        "RETURNING spam_strikes",
+        (user_id,),
+    ).fetchone()["spam_strikes"]
+    if strikes >= config.SPAM_STRIKES_BAN:
+        ban_user(db, user_id)
+        log_activity(db, "ban", f"🤖 {name} a été suspendu·e automatiquement pour spam")
+        push.push_to_users(
+            admin_ids(db), "🤖 Suspension automatique",
+            f"{name} a été suspendu·e pour spam de likes",
+        )
+        db.commit()  # on lève une exception : il faut persister nous-mêmes
+        raise HTTPException(
+            status_code=403, detail="Compte suspendu pour spam de likes"
+        )
+    db.commit()  # idem : le strike doit survivre au rollback de l'erreur 429
+    raise HTTPException(
+        status_code=429,
+        detail=f"Tu as utilisé tes {config.DAILY_LIKES} likes du jour. "
+        "Reviens demain 😉",
+    )
 
 
 @app.post("/api/rewind")

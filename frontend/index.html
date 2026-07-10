@@ -78,6 +78,32 @@
       </div>
     </section>
 
+    <!-- ================= KYI (vérification d'identité) ================= -->
+    <section id="view-kyi" class="view hidden">
+      <div class="waiting-card kyi-card">
+        <div class="waiting-emoji">🪪</div>
+        <h2>Vérification d'identité</h2>
+        <p class="muted">Pour garder SJDA 100&nbsp;% élèves de l'école, complète
+        ton dossier. Ces informations ne sont visibles que par l'équipe de
+        modération — jamais par les autres élèves.</p>
+        <form id="form-kyi" class="auth-form">
+          <input type="text" id="k-fullname" placeholder="Nom et prénom officiels" required minlength="3" maxlength="120">
+          <label class="filter-label">Date de naissance
+            <input type="date" id="k-birthdate" required>
+          </label>
+          <input type="text" id="k-classe" placeholder="Classe / filière (ex. MPSI)" required maxlength="40">
+          <label class="card-picker" id="card-picker">
+            <span id="card-picker-text">📷 Photo de ta carte d'étudiant</span>
+            <img id="card-preview" class="hidden" alt="">
+            <input type="file" id="k-card" accept="image/jpeg,image/png,image/webp" hidden>
+          </label>
+          <button type="submit" class="btn-primary">Envoyer mon dossier</button>
+          <p id="kyi-error" class="error hidden"></p>
+        </form>
+        <button id="btn-kyi-logout" class="btn-ghost">Se déconnecter</button>
+      </div>
+    </section>
+
     <!-- ================= ATTENTE DE VALIDATION ================= -->
     <section id="view-waiting" class="view hidden">
       <div class="waiting-card">
@@ -192,6 +218,15 @@
         <p id="match-popup-text"></p>
         <button id="btn-match-socials" class="btn-light">Voir ses réseaux 🔓</button>
         <button id="btn-match-close" class="btn-ghost-light">Continuer à swiper</button>
+      </div>
+    </div>
+
+    <!-- ================= CARTE D'ÉTUDIANT (vue modo) ================= -->
+    <div id="card-popup" class="match-popup hidden">
+      <div class="match-popup-inner">
+        <h2 id="card-popup-title">Carte d'étudiant</h2>
+        <img id="card-popup-img" class="card-full" alt="">
+        <button id="btn-card-close" class="btn-ghost">Fermer</button>
       </div>
     </div>
 

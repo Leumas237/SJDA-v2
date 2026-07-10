@@ -31,11 +31,11 @@ async function api(path, options = {}) {
 
 /* ---------------- navigation ---------------- */
 
-const VIEWS = ["auth", "discover", "matches", "waiting", "profile", "admin"];
+const VIEWS = ["auth", "discover", "matches", "waiting", "kyi", "profile", "admin"];
 
 function show(view) {
   VIEWS.forEach((v) => $("view-" + v).classList.toggle("hidden", v !== view));
-  $("navbar").classList.toggle("hidden", view === "auth");
+  $("navbar").classList.toggle("hidden", view === "auth" || view === "kyi");
   document.querySelectorAll(".nav-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === view)
   );
@@ -106,7 +106,10 @@ async function onLoggedIn(data, isNew = false) {
   applyAccessUi();
   connectWs();
   setupPush();
-  if (!state.me.approved) { show("waiting"); return; }
+  if (!state.me.approved) {
+    show(state.me.kyi_submitted ? "waiting" : "kyi");
+    return;
+  }
   if (isNew) { show("profile"); fillProfileForm(); }
   else { show("discover"); loadDeck(); }
 }
@@ -123,6 +126,43 @@ function logout() {
 $("btn-logout").onclick = logout;
 $("btn-waiting-logout").onclick = logout;
 $("btn-waiting-profile").onclick = () => { show("profile"); fillProfileForm(); };
+
+/* ---------------- KYI (vérification d'identité) ---------------- */
+
+$("btn-kyi-logout").onclick = logout;
+
+$("k-card").addEventListener("change", () => {
+  const file = $("k-card").files[0];
+  if (!file) return;
+  $("card-preview").src = URL.createObjectURL(file);
+  $("card-preview").classList.remove("hidden");
+  $("card-picker-text").textContent = "📷 " + file.name;
+});
+
+$("form-kyi").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = $("k-card").files[0];
+  const errEl = $("kyi-error");
+  errEl.classList.add("hidden");
+  if (!file) {
+    errEl.textContent = "Ajoute une photo de ta carte d'étudiant";
+    errEl.classList.remove("hidden");
+    return;
+  }
+  const form = new FormData();
+  form.append("full_name", $("k-fullname").value);
+  form.append("birthdate", $("k-birthdate").value);
+  form.append("classe", $("k-classe").value);
+  form.append("card", file);
+  try {
+    await api("/kyi", { method: "POST", body: form });
+    state.me = await api("/me");
+    show("waiting");
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove("hidden");
+  }
+});
 
 /* ---------------- attente de validation ---------------- */
 
@@ -577,14 +617,23 @@ function renderAdminPending(pending) {
   pending.forEach((u) => {
     const div = document.createElement("div");
     div.className = "report-card pending";
+    const kyi = u.kyi
+      ? `<div class="kyi-info">
+           🪪 <b>${escapeHtml(u.kyi.full_name)}</b> · né·e le ${escapeHtml(u.kyi.birthdate)}
+           · ${escapeHtml(u.kyi.classe)}
+           ${u.kyi.card_url ? '<button type="button" class="btn-mini" data-card>Voir la carte 🪪</button>' : ""}
+         </div>`
+      : '<div class="kyi-info muted">⏳ Dossier KYI pas encore soumis — attends avant d\'accepter</div>';
     div.innerHTML = `
       <div class="r-head"><b>${escapeHtml(u.name)}</b>
-        <span class="muted">${escapeHtml(u.email)}${u.classe ? " · " + escapeHtml(u.classe) : ""}</span></div>
-      ${u.bio ? `<div class="r-reason">« ${escapeHtml(u.bio)} »</div>` : ""}
+        <span class="muted">${escapeHtml(u.email)}</span></div>
+      ${kyi}
       <div class="r-actions">
         <button class="btn-mini ok" data-approve="1">✅ Accepter</button>
         <button class="btn-mini danger" data-approve="0">❌ Refuser</button>
       </div>`;
+    const cardBtn = div.querySelector("[data-card]");
+    if (cardBtn) cardBtn.onclick = () => showKyiCard(u);
     div.querySelectorAll("[data-approve]").forEach((btn) => {
       btn.onclick = async () => {
         const approve = btn.dataset.approve === "1";
@@ -635,6 +684,23 @@ function renderAdminReports(reports) {
     box.appendChild(div);
   });
 }
+
+async function showKyiCard(u) {
+  // l'image est protégée : on la récupère avec le jeton puis on l'affiche
+  const res = await fetch(u.kyi.card_url, {
+    headers: { Authorization: "Bearer " + state.token },
+  });
+  if (!res.ok) { alert("Impossible de charger la carte"); return; }
+  const blob = await res.blob();
+  $("card-popup-title").textContent = `Carte de ${u.kyi.full_name}`;
+  $("card-popup-img").src = URL.createObjectURL(blob);
+  $("card-popup").classList.remove("hidden");
+}
+
+$("btn-card-close").onclick = () => {
+  URL.revokeObjectURL($("card-popup-img").src);
+  $("card-popup").classList.add("hidden");
+};
 
 function renderAdminUsers(users) {
   const box = $("admin-users");
@@ -736,7 +802,7 @@ function connectWs() {
         appendFeedItem(data.event);
         api("/admin/overview").then((o) => renderAdminStats(o.stats)).catch(() => {});
         if (data.event.type === "report") api("/admin/reports").then(renderAdminReports).catch(() => {});
-        if (data.event.type === "signup_request" || data.event.type === "approve") {
+        if (["signup_request", "approve", "kyi"].includes(data.event.type)) {
           api("/admin/pending").then(renderAdminPending).catch(() => {});
           api("/admin/users").then(renderAdminUsers).catch(() => {});
         }
@@ -775,7 +841,10 @@ api("/config").then((c) => {
       applyAccessUi();
       connectWs();
       setupPush();
-      if (!state.me.approved) { show("waiting"); return; }
+      if (!state.me.approved) {
+        show(state.me.kyi_submitted ? "waiting" : "kyi");
+        return;
+      }
       show("discover");
       loadDeck();
       return;

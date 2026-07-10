@@ -5,6 +5,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("SJDA_DATA_DIR", BASE_DIR / "data"))
 UPLOADS_DIR = DATA_DIR / "uploads"
+# cartes d'étudiant du KYI : jamais servies publiquement, accès modos uniquement
+KYI_DIR = DATA_DIR / "kyi"
 DB_PATH = DATA_DIR / "sjda.db"
 
 APP_NAME = os.environ.get("SJDA_APP_NAME", "SJDA")
@@ -40,3 +42,4 @@ SESSION_DAYS = 30
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+KYI_DIR.mkdir(parents=True, exist_ok=True)

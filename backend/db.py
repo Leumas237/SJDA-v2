@@ -65,6 +65,15 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS kyi (
+    user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    full_name    TEXT NOT NULL DEFAULT '',
+    birthdate    TEXT NOT NULL DEFAULT '',            -- AAAA-MM-JJ
+    classe       TEXT NOT NULL DEFAULT '',
+    card_photo   TEXT NOT NULL DEFAULT '',            -- fichier dans data/kyi/
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS photos (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

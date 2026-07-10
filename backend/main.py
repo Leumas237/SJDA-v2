@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import (
     FastAPI,
+    Form,
     HTTPException,
     UploadFile,
     WebSocket,
@@ -255,12 +256,76 @@ def me(user_id: int = auth.CurrentUser):
                 (user_id,),
             ).fetchall()
         ]
+        kyi_row = db.execute(
+            "SELECT 1 FROM kyi WHERE user_id = ?", (user_id,)
+        ).fetchone()
     return {
         **profile_dict(row, socials=True, photos=[p["url"] for p in my_photos]),
         "my_photos": my_photos,
         "is_admin": bool(row["is_admin"]),
         "approved": bool(row["approved"]),
+        "kyi_submitted": bool(kyi_row),
     }
+
+
+# ---------------------------------------------------------------- KYI
+
+IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
+
+def require_kyi(db, user_id: int) -> None:
+    """La personnalisation du compte est bloquée tant que le dossier
+    d'identité (KYI) n'a pas été soumis. Les comptes validés passent."""
+    user = db.execute(
+        "SELECT approved FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    if user and user["approved"]:
+        return
+    if not db.execute("SELECT 1 FROM kyi WHERE user_id = ?", (user_id,)).fetchone():
+        raise HTTPException(
+            status_code=403,
+            detail="Complète d'abord ta vérification d'identité (KYI)",
+        )
+
+
+@app.post("/api/kyi")
+async def submit_kyi(
+    full_name: str = Form(min_length=3, max_length=120),
+    birthdate: str = Form(min_length=8, max_length=10),
+    classe: str = Form(min_length=1, max_length=40),
+    card: UploadFile | None = None,
+    user_id: int = auth.CurrentUser,
+):
+    if card is None:
+        raise HTTPException(status_code=422, detail="Photo de la carte requise")
+    ext = IMAGE_EXT.get(card.content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Formats acceptés : JPEG, PNG, WebP")
+    data = await card.read()
+    if len(data) > config.MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Photo trop lourde (max 5 Mo)")
+    filename = f"u{user_id}_{secrets.token_hex(8)}{ext}"
+    (config.KYI_DIR / filename).write_bytes(data)
+    with get_db() as db:
+        old = db.execute(
+            "SELECT card_photo FROM kyi WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        db.execute(
+            "INSERT OR REPLACE INTO kyi (user_id, full_name, birthdate, classe, card_photo) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, full_name.strip(), birthdate.strip(), classe.strip(), filename),
+        )
+        name = db.execute(
+            "SELECT name FROM users WHERE id = ?", (user_id,)
+        ).fetchone()["name"]
+        log_activity(db, "kyi", f"🪪 {name} a soumis son dossier d'inscription")
+        push.push_to_users(
+            admin_ids(db), "Dossier d'inscription à examiner",
+            f"{name} a complété sa vérification d'identité",
+        )
+    if old and old["card_photo"] and old["card_photo"] != filename:
+        (config.KYI_DIR / old["card_photo"]).unlink(missing_ok=True)
+    return {"ok": True}
 
 
 @app.put("/api/profile")
@@ -278,6 +343,7 @@ def update_profile(body: ProfileIn, user_id: int = auth.CurrentUser):
     snapchat = body.snapchat.strip().lstrip("@")
     whatsapp = "".join(c for c in body.whatsapp if c.isdigit() or c == "+")
     with get_db() as db:
+        require_kyi(db, user_id)
         db.execute(
             "UPDATE profiles SET bio = ?, classe = ?, interests = ?, intent = ?, "
             "gender = ?, seeking = ?, instagram = ?, snapchat = ?, whatsapp = ?, "
@@ -304,9 +370,7 @@ MAX_PHOTOS = 6
 
 @app.post("/api/profile/photo")
 async def upload_photo(photo: UploadFile, user_id: int = auth.CurrentUser):
-    ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
-        photo.content_type
-    )
+    ext = IMAGE_EXT.get(photo.content_type)
     if not ext:
         raise HTTPException(status_code=415, detail="Formats acceptés : JPEG, PNG, WebP")
     data = await photo.read()
@@ -314,6 +378,7 @@ async def upload_photo(photo: UploadFile, user_id: int = auth.CurrentUser):
         raise HTTPException(status_code=413, detail="Photo trop lourde (max 5 Mo)")
     filename = f"u{user_id}_{secrets.token_hex(8)}{ext}"
     with get_db() as db:
+        require_kyi(db, user_id)
         count = db.execute(
             "SELECT COUNT(*) c FROM photos WHERE user_id = ?", (user_id,)
         ).fetchone()["c"]
@@ -644,14 +709,49 @@ def admin_handle_report(
 
 @app.get("/api/admin/pending")
 def admin_pending(admin_id: int = auth.CurrentAdmin):
-    """Demandes d'inscription en attente de validation."""
+    """Demandes d'inscription en attente, avec leur dossier KYI."""
     with get_db() as db:
         rows = db.execute(
-            "SELECT u.id, u.name, u.email, u.created_at, p.classe, p.bio "
-            "FROM users u JOIN profiles p ON p.user_id = u.id "
-            "WHERE u.approved = 0 AND u.banned = 0 ORDER BY u.id"
+            """
+            SELECT u.id, u.name, u.email, u.created_at,
+                   k.full_name, k.birthdate, k.classe, k.card_photo, k.submitted_at
+            FROM users u LEFT JOIN kyi k ON k.user_id = u.id
+            WHERE u.approved = 0 AND u.banned = 0 ORDER BY u.id
+            """
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "email": r["email"],
+            "created_at": r["created_at"],
+            "kyi": {
+                "full_name": r["full_name"],
+                "birthdate": r["birthdate"],
+                "classe": r["classe"],
+                "card_url": f"/api/admin/kyi-card/{r['id']}" if r["card_photo"] else "",
+                "submitted_at": r["submitted_at"],
+            }
+            if r["full_name"] is not None
+            else None,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/admin/kyi-card/{target_id}")
+def admin_kyi_card(target_id: int, admin_id: int = auth.CurrentAdmin):
+    """Photo de la carte d'étudiant : accessible uniquement aux modos."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT card_photo FROM kyi WHERE user_id = ?", (target_id,)
+        ).fetchone()
+    if not row or not row["card_photo"]:
+        raise HTTPException(status_code=404, detail="Carte introuvable")
+    path = config.KYI_DIR / row["card_photo"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Fichier manquant")
+    return FileResponse(path)
 
 
 @app.post("/api/admin/users/{target_id}/approve")
@@ -670,7 +770,12 @@ def admin_approve(target_id: int, body: ApproveIn, admin_id: int = auth.CurrentA
                 f"Bienvenue sur {config.APP_NAME} ! Tu peux commencer à swiper.",
             )
         else:
-            # refus : le compte et son profil sont supprimés
+            # refus : le compte, son profil et sa carte d'étudiant sont supprimés
+            kyi_row = db.execute(
+                "SELECT card_photo FROM kyi WHERE user_id = ?", (target_id,)
+            ).fetchone()
+            if kyi_row and kyi_row["card_photo"]:
+                (config.KYI_DIR / kyi_row["card_photo"]).unlink(missing_ok=True)
             db.execute("DELETE FROM users WHERE id = ?", (target_id,))
             log_activity(db, "approve", f"❌ La demande de {user['name']} a été refusée")
     return {"ok": True}

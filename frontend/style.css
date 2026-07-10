@@ -199,6 +199,20 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); b
   display: flex; flex-direction: column; gap: 12px;
 }
 .waiting-emoji { font-size: 3rem; }
+.kyi-card { max-width: 420px; text-align: left; }
+.kyi-card h2, .kyi-card > .waiting-emoji, .kyi-card > .muted { text-align: center; }
+.card-picker {
+  border: 2px dashed var(--border); border-radius: 12px; padding: 14px;
+  text-align: center; color: var(--muted); cursor: pointer;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+.card-picker img { max-width: 100%; max-height: 160px; border-radius: 8px; }
+.card-full { max-width: 100%; border-radius: 10px; }
+.kyi-info {
+  background: var(--bg); border-radius: 8px; padding: 8px 10px;
+  margin: 6px 0; font-size: 0.88rem;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+}
 
 /* ---------- fiche match : réseaux ---------- */
 .detail-inner { gap: 8px; }

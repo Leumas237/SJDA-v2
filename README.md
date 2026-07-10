@@ -21,6 +21,12 @@ sortir de leur bulle : se faire des amis, ou peut-être plus, si affinités !
   que des profils compatibles
 - ✋ **Inscriptions validées à la main** : chaque demande d'inscription doit être
   acceptée par un admin avant que l'élève accède à l'app
+- 🪪 **KYI (vérification d'identité)** : juste après l'inscription et avant
+  toute personnalisation du compte, l'élève soumet un dossier obligatoire —
+  nom et prénom officiels, date de naissance, classe, photo de la carte
+  d'étudiant. Les modos valident sur dossier ; la carte est stockée hors du
+  dossier public (`data/kyi/`), servie uniquement aux modos via un endpoint
+  authentifié, et supprimée si la demande est refusée
 - 🏫 **Réservé à l'école** : inscription avec un email étudiant de l'Institut
   Saint Jean (@institutsaintjean.org, @cpgesaintjean.org,
   @universitesaintjean.org, @prepavogt.org, @saintjeaningenieur.org,
@@ -98,9 +104,12 @@ frontend/         PWA en HTML/CSS/JS vanilla (aucun build nécessaire)
 Déclare les comptes modérateurs avec `SJDA_ADMIN_EMAILS` (l'onglet 🛡️
 Modération apparaît pour eux). Le tableau de bord montre :
 
-- les **demandes d'inscription** : tout nouveau compte est en attente jusqu'à
-  ce qu'un admin l'accepte (l'élève peut préparer son profil en attendant,
-  sa page se débloque automatiquement). Refuser supprime le compte
+- les **demandes d'inscription** avec le dossier KYI complet (identité,
+  date de naissance, classe, carte d'étudiant consultable) : tout nouveau
+  compte est en attente jusqu'à ce qu'un admin l'accepte. Une fois son KYI
+  soumis, l'élève peut préparer son profil en attendant ; sa page se
+  débloque automatiquement à l'acceptation. Refuser supprime le compte
+  et son dossier
 - les **statistiques** (élèves, demandes, matchs, signalements, bannis)
 - un **fil d'activité en direct** (demandes, inscriptions, matchs,
   signalements — poussé par WebSocket, sans recharger la page)
